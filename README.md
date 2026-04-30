@@ -1,5 +1,7 @@
 # Telegram 私聊机器人 (Cloudflare Workers 版)
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Linsars/dm-gateway-bot)
+
 基于 [ZenmoFeiShi/dm-gateway-bot](https://github.com/ZenmoFeiShi/dm-gateway-bot) 项目，专为 Cloudflare Workers 部署设计。
 
 ## ✨ 核心特性
