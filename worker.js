@@ -67,19 +67,12 @@ export default {
           <head><title>Telegram 机器人部署完成</title></head>
           <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
             <h1>🤖 Telegram 机器人部署完成</h1>
-            <p>机器人已部署到：<strong>${webhookUrl}</strong></p>
-            <p>请激活 Webhook 以开始接收消息：</p>
-            <p>
-              <a href="https://api.telegram.org/bot${env.ENV_BOT_TOKEN}/setWebhook?url=${webhookUrl}" 
-                 target="_blank" 
-                 style="background-color: #0088cc; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-                点击激活 Webhook
-              </a>
+            <p>Webhook 地址：<strong>${webhookUrl}</strong></p>
+            <p>请在浏览器访问以下地址激活（替换 YOUR_TOKEN 为你的 Bot Token）：</p>
+            <p style="background: #f5f5f5; padding: 10px; border-radius: 5px; font-family: monospace;">
+              https://api.telegram.org/bot<strong>YOUR_TOKEN</strong>/setWebhook?url=${webhookUrl}
             </p>
-            <p style="font-size: 12px; color: #666;">
-              或者手动访问：<br>
-              https://api.telegram.org/bot${env.ENV_BOT_TOKEN}/setWebhook?url=${webhookUrl}
-            </p>
+            <p>激活成功后会返回 <code>{"ok":true}</code></p>
             <hr>
             <p>激活后，机器人即可正常工作：</p>
             <ul style="text-align: left; display: inline-block;">
