@@ -176,10 +176,24 @@ async function getUserIdByThread(env, threadId) {
   return uid ? Number(uid) : null;
 }
 
+// ============ 通知主人话题 ============
+async function notifyOwner(env, userId, from, text) {
+  try {
+    const topic = await getOrCreateTopic(env, userId, from);
+    await tgApi(env.ENV_BOT_TOKEN, "sendMessage", {
+      chat_id: env.ENV_SUPERGROUP_ID,
+      message_thread_id: topic.thread_id,
+      text: text
+    });
+  } catch (e) {
+    // 创建话题失败，私聊通知主人
+    await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: env.ENV_OWNER_ID, text: `[话题创建失败] ${text}` });
+  }
+}
+
 // ============ 发送验证题 ============
-async function sendTextVerify(env, userId) {
+async function sendTextVerify(env, userId, from) {
   const q = generateTextQuestion();
-  // 存到 KV，5 分钟过期
   await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "text", answer: q.answer }), { expirationTtl: 300 });
   const buttons = q.options.map(e => ({ text: e, callback_data: `v:text:${e}` }));
   await tgApi(env.ENV_BOT_TOKEN, "sendMessage", {
@@ -187,9 +201,11 @@ async function sendTextVerify(env, userId) {
     text: `🤖 请回答以下问题：\n\n${q.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
+  // 通知主人有新访客
+  await notifyOwner(env, userId, from, `👤 新访客：${from.first_name || "未知"}\nUID: ${userId}\n正在答题...`);
 }
 
-async function sendEmojiVerify(env, userId) {
+async function sendEmojiVerify(env, userId, from) {
   const c = generateEmojiCaptcha();
   await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "emoji", answer: c.answer }), { expirationTtl: 300 });
   const buttons = c.options.map(e => ({ text: e, callback_data: `v:emoji:${e}` }));
@@ -198,6 +214,8 @@ async function sendEmojiVerify(env, userId) {
     text: `⚠️ 文字验证失败，再来一个：\n\n${c.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
+  // 通知主人
+  await notifyOwner(env, userId, from, `⚠️ 访客 ${from.first_name || "未知"} (${userId}) 文字验证失败，正在表情验证...`);
 }
 
 // ============ 转发消息 ============
@@ -319,13 +337,12 @@ export default {
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "验证已过期，请重发 /start" }), { headers: { "Content-Type": "application/json" } });
         }
         if (selected === state.answer) {
-          // 文字验证通过
           await env.KV.put(`verified:${uid}`, "1", { expirationTtl: 2592000 });
           await env.KV.delete(`verify:${uid}`);
+          await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 验证通过，可以对话了`);
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "✅ 验证通过！" }), { headers: { "Content-Type": "application/json" } });
         }
-        // 文字验证失败 → 进入表情验证
-        await sendEmojiVerify(env, uid);
+        await sendEmojiVerify(env, uid, q.from);
         return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "❌ 答错了，请用表情再试一次" }), { headers: { "Content-Type": "application/json" } });
       }
 
@@ -337,15 +354,17 @@ export default {
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "验证已过期，请重发 /start" }), { headers: { "Content-Type": "application/json" } });
         }
         if (selected === state.answer) {
-          // 表情验证通过
           await env.KV.put(`verified:${uid}`, "1", { expirationTtl: 2592000 });
           await env.KV.delete(`verify:${uid}`);
+          await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 表情验证通过，可以对话了`);
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "✅ 验证通过！" }), { headers: { "Content-Type": "application/json" } });
         }
-        // 表情也错了 → ban 一周
+        // ban 一周
         await env.KV.put(`banned:${uid}`, "1", { expirationTtl: 604800 });
         await env.KV.delete(`verify:${uid}`);
         await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 验证失败，你已被关小黑屋，一周后自动解除。" });
+        // 在话题里通知主人，主人可以 /unban
+        await notifyOwner(env, uid, q.from, `🚫 访客 ${q.from.first_name || "未知"} (${uid}) 验证失败，已 ban 一周\n在本话题发送 /unban 可立即解封`);
         return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "🚫 验证失败，已被封禁一周", show_alert: true }), { headers: { "Content-Type": "application/json" } });
       }
 
@@ -386,12 +405,12 @@ export default {
           if (String(uid) === String(env.ENV_OWNER_ID)) {
             await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 机器人已就绪。\n在群组话题里直接发消息即可回复访客。" });
           } else {
-            // 检查封禁
             const banned = await env.KV.get(`banned:${uid}`);
             if (banned) {
               await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 你已被关小黑屋，一周后自动解除。" });
+              await notifyOwner(env, uid, msg.from, `🚫 被 ban 的访客 ${msg.from.first_name || "未知"} (${uid}) 尝试访问\n在本话题发送 /unban 可解封`);
             } else {
-              await sendTextVerify(env, uid);
+              await sendTextVerify(env, uid, msg.from);
             }
           }
         }
@@ -415,7 +434,7 @@ export default {
       }
 
       // 未验证 → 发文字验证
-      await sendTextVerify(env, uid);
+      await sendTextVerify(env, uid, msg.from);
     }
 
     return new Response("ok");
