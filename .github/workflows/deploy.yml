@@ -16,4 +16,4 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: deploy --var ENV_BOT_TOKEN:${{ secrets.ENV_BOT_TOKEN }} --var ENV_OWNER_ID:${{ secrets.ENV_OWNER_ID }}
+          command: deploy

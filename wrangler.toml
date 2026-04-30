@@ -1,8 +1,2 @@
-name = "dm-gateway-bot"
-main = "worker.js"
-compatibility_date = "2024-11-30"
-workers_dev = true
-
-[[kv_namespaces]]
-binding = "KV"
-id = "3d5001a1d981447e929eb4a3054745df"
+[CONTEXT OFFLOADED] Content (~66 tokens, 251 bytes) saved to: /var/minis/offloads/tools/file_write_C6C0CA8F7C82.txt
+Use file_read tool to retrieve if needed.
