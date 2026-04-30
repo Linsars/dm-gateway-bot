@@ -68,34 +68,95 @@ function generateCaptcha() {
   return { question: c.question, answer: c.answer, options };
 }
 
-async function sendMessage(token, chatId, text, extra) {
-  const body = { chat_id: chatId, text };
-  if (extra) Object.assign(body, extra);
-  return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+// 调用 Telegram API
+async function tgApi(token, method, body) {
+  return fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
 }
 
-async function forwardToOwner(env, userId, userName, message) {
-  let text = `💬 来自 ${userName} 的消息：\n用户 ID: ${userId}\n`;
-  if (message.text) text += `\n${message.text}`;
-  await sendMessage(env.ENV_BOT_TOKEN, env.ENV_OWNER_ID, text);
+// 从转发消息中提取用户 ID
+function extractUserId(text) {
+  if (!text) return null;
+  const match = text.match(/用户 ID: (\d+)/);
+  return match ? match[1] : null;
+}
+
+// 转发访客消息给主人
+async function forwardToOwner(env, userId, userName, msg) {
+  const token = env.ENV_BOT_TOKEN;
+  const ownerId = env.ENV_OWNER_ID;
+  const header = `💬 来自 ${userName} 的消息：\n用户 ID: ${userId}\n`;
+
+  if (msg.text) {
+    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header + "\n" + msg.text });
+  } else if (msg.photo) {
+    await tgApi(token, "sendPhoto", { chat_id: ownerId, photo: msg.photo[msg.photo.length - 1].file_id, caption: header + (msg.caption || "") });
+  } else if (msg.video) {
+    await tgApi(token, "sendVideo", { chat_id: ownerId, video: msg.video.file_id, caption: header + (msg.caption || "") });
+  } else if (msg.voice) {
+    await tgApi(token, "sendVoice", { chat_id: ownerId, voice: msg.voice.file_id, caption: header });
+  } else if (msg.audio) {
+    await tgApi(token, "sendAudio", { chat_id: ownerId, audio: msg.audio.file_id, caption: header + (msg.caption || "") });
+  } else if (msg.document) {
+    await tgApi(token, "sendDocument", { chat_id: ownerId, document: msg.document.file_id, caption: header + (msg.caption || "") });
+  } else if (msg.sticker) {
+    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
+    await tgApi(token, "sendSticker", { chat_id: ownerId, sticker: msg.sticker.file_id });
+  } else if (msg.video_note) {
+    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
+    await tgApi(token, "sendVideoNote", { chat_id: ownerId, video_note: msg.video_note.file_id });
+  } else if (msg.location) {
+    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
+    await tgApi(token, "sendLocation", { chat_id: ownerId, latitude: msg.location.latitude, longitude: msg.location.longitude });
+  } else if (msg.contact) {
+    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
+    await tgApi(token, "sendContact", { chat_id: ownerId, phone_number: msg.contact.phone_number, first_name: msg.contact.first_name });
+  } else if (msg.animation) {
+    await tgApi(token, "sendAnimation", { chat_id: ownerId, animation: msg.animation.file_id, caption: header });
+  } else {
+    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header + "\n[未知消息类型]" });
+  }
+}
+
+// 主人回复访客
+async function replyToVisitor(env, targetId, msg) {
+  const token = env.ENV_BOT_TOKEN;
+  const prefix = "💬 主人回复：\n";
+
+  if (msg.text) {
+    await tgApi(token, "sendMessage", { chat_id: targetId, text: prefix + msg.text });
+  } else if (msg.photo) {
+    await tgApi(token, "sendPhoto", { chat_id: targetId, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
+  } else if (msg.video) {
+    await tgApi(token, "sendVideo", { chat_id: targetId, video: msg.video.file_id, caption: msg.caption || "" });
+  } else if (msg.voice) {
+    await tgApi(token, "sendVoice", { chat_id: targetId, voice: msg.voice.file_id });
+  } else if (msg.audio) {
+    await tgApi(token, "sendAudio", { chat_id: targetId, audio: msg.audio.file_id });
+  } else if (msg.document) {
+    await tgApi(token, "sendDocument", { chat_id: targetId, document: msg.document.file_id, caption: msg.caption || "" });
+  } else if (msg.sticker) {
+    await tgApi(token, "sendSticker", { chat_id: targetId, sticker: msg.sticker.file_id });
+  } else if (msg.animation) {
+    await tgApi(token, "sendAnimation", { chat_id: targetId, animation: msg.animation.file_id });
+  } else if (msg.location) {
+    await tgApi(token, "sendLocation", { chat_id: targetId, latitude: msg.location.latitude, longitude: msg.location.longitude });
+  } else {
+    await tgApi(token, "sendMessage", { chat_id: targetId, text: prefix + "[未知消息类型]" });
+  }
 }
 
 // ============ 主处理 ============
 export default {
   async fetch(request, env) {
-    // GET → 显示激活页面
     if (request.method === "GET") {
       return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
-    // 只接受 POST
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
-    }
+    if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
     const update = await request.json();
 
@@ -127,36 +188,48 @@ export default {
       const name = msg.from.first_name || "未知";
       const text = msg.text;
 
+      // 命令处理
       if (text && text.startsWith("/")) {
         if (text === "/start") {
           if (String(uid) === String(env.ENV_OWNER_ID)) {
-            await sendMessage(env.ENV_BOT_TOKEN, uid, "你是管理员，可以直接发消息给我，我会帮你转发。");
+            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 机器人已就绪。回复转发消息即可回复对应访客。" });
           } else if (verifiedUsers.has(uid)) {
-            await sendMessage(env.ENV_BOT_TOKEN, uid, "你已通过验证，直接发消息即可。");
+            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "你已通过验证，直接发消息即可。" });
           } else {
             const c = generateCaptcha();
             pendingUsers.set(uid, { answer: c.answer });
             const buttons = c.options.map(e => ({ text: e, callback_data: `verify:${e}` }));
-            await sendMessage(env.ENV_BOT_TOKEN, uid, `🤖 请先验证你是真人：\n\n${c.question}`, { reply_markup: { inline_keyboard: [buttons] } });
+            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: `🤖 请先验证你是真人：\n\n${c.question}`, reply_markup: { inline_keyboard: [buttons] } });
           }
         }
         return new Response("ok");
       }
 
+      // 主人消息：回复转发的消息
       if (String(uid) === String(env.ENV_OWNER_ID)) {
+        if (msg.reply_to_message) {
+          const replied = msg.reply_to_message;
+          const sourceText = replied.text || replied.caption || "";
+          const targetId = extractUserId(sourceText);
+          if (targetId) {
+            await replyToVisitor(env, targetId, msg);
+            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: `✅ 已回复用户 ${targetId}` });
+          }
+        }
         return new Response("ok");
       }
 
+      // 未验证访客
       if (!verifiedUsers.has(uid)) {
         const c = generateCaptcha();
         pendingUsers.set(uid, { answer: c.answer });
         const buttons = c.options.map(e => ({ text: e, callback_data: `verify:${e}` }));
-        await sendMessage(env.ENV_BOT_TOKEN, uid, `🤖 请先验证你是真人：\n\n${c.question}`, { reply_markup: { inline_keyboard: [buttons] } });
+        await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: `🤖 请先验证你是真人：\n\n${c.question}`, reply_markup: { inline_keyboard: [buttons] } });
         return new Response("ok");
       }
 
+      // 已验证访客：转发给主人
       await forwardToOwner(env, uid, name, msg);
-      await sendMessage(env.ENV_BOT_TOKEN, uid, "✅ 已发送给主人，等待回复...");
     }
 
     return new Response("ok");
