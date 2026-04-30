@@ -4,10 +4,9 @@ compatibility_date = "2026-04-30"
 workers_dev = true
 
 [vars]
-ENV_BOT_TOKEN = "123456:AAG***rxkx***LFPfzs
-"
-ENV_OWNER_ID = "67*****64"
+ENV_BOT_TOKEN = "123"
+ENV_OWNER_ID = "123"
 
 [[kv_namespaces]]
 binding = "KV"
-#id = "把id前面的#号去掉并用你的KV空间id取代这行字"
+id = "your_kv_namespace_id"
