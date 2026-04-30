@@ -1,7 +1,7 @@
-// Cloudflare Worker: Telegram 私聊中转机器人 (Emoji Captcha 验证)
-// 基于 ZenmoFeiShi/dm-gateway-bot 项目
+// Cloudflare Worker: Telegram 私聊中转机器人 (Emoji Captcha + 群组话题管理)
+// 基于 ZenmoFeiShi/dm-gateway-bot + Linsars/telegram_private_chatbot
 
-// ============ HTML 页面 ============
+// ============ HTML 激活页面 ============
 const HTML_PAGE = `<!DOCTYPE html>
 <html>
 <head>
@@ -47,7 +47,7 @@ const HTML_PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-// ============ Emoji Captcha 题库 ============
+// ============ Emoji Captcha ============
 const CAPTCHAS = [
   { question: "Tap 🐶", answer: "🐶" },
   { question: "Tap 🐱", answer: "🐱" },
@@ -70,83 +70,158 @@ function generateCaptcha() {
 
 // 调用 Telegram API
 async function tgApi(token, method, body) {
-  return fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const resp = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   });
+  return resp.json();
 }
 
-// 从转发消息中提取用户 ID
-function extractUserId(text) {
-  if (!text) return null;
-  const match = text.match(/用户 ID: (\d+)/);
-  return match ? match[1] : null;
+// 构建话题标题
+function buildTopicTitle(from) {
+  const name = [from.first_name || "", from.last_name || ""].join(" ").trim().substring(0, 50);
+  const username = from.username ? `@${from.username}` : "";
+  return `${name} ${username} [${from.id}]`.trim().substring(0, 128);
 }
 
-// 转发访客消息给主人
-async function forwardToOwner(env, userId, userName, msg) {
+// 获取或创建用户话题
+async function getOrCreateTopic(env, userId, from) {
+  // 先查 KV 里有没有
+  const existing = await env.KV.get(`user:${userId}`, { type: "json" });
+  if (existing && existing.thread_id) return existing;
+
+  // 创建新话题
+  const title = buildTopicTitle(from);
+  const res = await tgApi(env.ENV_BOT_TOKEN, "createForumTopic", {
+    chat_id: env.ENV_SUPERGROUP_ID,
+    name: title
+  });
+  if (!res.ok) throw new Error("创建话题失败: " + res.description);
+
+  const rec = { thread_id: res.result.message_thread_id, title };
+  await env.KV.put(`user:${userId}`, JSON.stringify(rec));
+  await env.KV.put(`thread:${rec.thread_id}`, String(userId));
+  return rec;
+}
+
+// 通过话题 ID 找用户 ID
+async function getUserIdByThread(env, threadId) {
+  const uid = await env.KV.get(`thread:${threadId}`);
+  return uid ? Number(uid) : null;
+}
+
+// 转发访客消息到群组话题
+async function forwardToTopic(env, userId, from, msg) {
+  const topic = await getOrCreateTopic(env, userId, from);
   const token = env.ENV_BOT_TOKEN;
-  const ownerId = env.ENV_OWNER_ID;
-  const header = `💬 来自 ${userName} 的消息：\n用户 ID: ${userId}\n`;
+  const chatId = env.ENV_SUPERGROUP_ID;
+  const threadId = topic.thread_id;
+
+  const body = { chat_id: chatId, message_thread_id: threadId };
 
   if (msg.text) {
-    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header + "\n" + msg.text });
+    await tgApi(token, "sendMessage", { ...body, text: msg.text });
   } else if (msg.photo) {
-    await tgApi(token, "sendPhoto", { chat_id: ownerId, photo: msg.photo[msg.photo.length - 1].file_id, caption: header + (msg.caption || "") });
+    await tgApi(token, "sendPhoto", { ...body, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
   } else if (msg.video) {
-    await tgApi(token, "sendVideo", { chat_id: ownerId, video: msg.video.file_id, caption: header + (msg.caption || "") });
+    await tgApi(token, "sendVideo", { ...body, video: msg.video.file_id, caption: msg.caption || "" });
   } else if (msg.voice) {
-    await tgApi(token, "sendVoice", { chat_id: ownerId, voice: msg.voice.file_id, caption: header });
+    await tgApi(token, "sendVoice", { ...body, voice: msg.voice.file_id });
   } else if (msg.audio) {
-    await tgApi(token, "sendAudio", { chat_id: ownerId, audio: msg.audio.file_id, caption: header + (msg.caption || "") });
+    await tgApi(token, "sendAudio", { ...body, audio: msg.audio.file_id, caption: msg.caption || "" });
   } else if (msg.document) {
-    await tgApi(token, "sendDocument", { chat_id: ownerId, document: msg.document.file_id, caption: header + (msg.caption || "") });
+    await tgApi(token, "sendDocument", { ...body, document: msg.document.file_id, caption: msg.caption || "" });
   } else if (msg.sticker) {
-    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
-    await tgApi(token, "sendSticker", { chat_id: ownerId, sticker: msg.sticker.file_id });
+    await tgApi(token, "sendSticker", { ...body, sticker: msg.sticker.file_id });
   } else if (msg.video_note) {
-    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
-    await tgApi(token, "sendVideoNote", { chat_id: ownerId, video_note: msg.video_note.file_id });
-  } else if (msg.location) {
-    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
-    await tgApi(token, "sendLocation", { chat_id: ownerId, latitude: msg.location.latitude, longitude: msg.location.longitude });
-  } else if (msg.contact) {
-    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header });
-    await tgApi(token, "sendContact", { chat_id: ownerId, phone_number: msg.contact.phone_number, first_name: msg.contact.first_name });
+    await tgApi(token, "sendVideoNote", { ...body, video_note: msg.video_note.file_id });
   } else if (msg.animation) {
-    await tgApi(token, "sendAnimation", { chat_id: ownerId, animation: msg.animation.file_id, caption: header });
+    await tgApi(token, "sendAnimation", { ...body, animation: msg.animation.file_id, caption: msg.caption || "" });
+  } else if (msg.location) {
+    await tgApi(token, "sendLocation", { ...body, latitude: msg.location.latitude, longitude: msg.location.longitude });
+  } else if (msg.contact) {
+    await tgApi(token, "sendContact", { ...body, phone_number: msg.contact.phone_number, first_name: msg.contact.first_name });
   } else {
-    await tgApi(token, "sendMessage", { chat_id: ownerId, text: header + "\n[未知消息类型]" });
+    await tgApi(token, "sendMessage", { ...body, text: "[未知消息类型]" });
   }
 }
 
-// 主人回复访客
-async function replyToVisitor(env, targetId, msg) {
+// 主人回复访客（直接 copyMessage，不需要引用）
+async function replyToVisitor(env, targetUserId, msg) {
   const token = env.ENV_BOT_TOKEN;
-  const prefix = "💬 主人回复：\n";
 
   if (msg.text) {
-    await tgApi(token, "sendMessage", { chat_id: targetId, text: prefix + msg.text });
+    await tgApi(token, "sendMessage", { chat_id: targetUserId, text: msg.text });
   } else if (msg.photo) {
-    await tgApi(token, "sendPhoto", { chat_id: targetId, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
+    await tgApi(token, "sendPhoto", { chat_id: targetUserId, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
   } else if (msg.video) {
-    await tgApi(token, "sendVideo", { chat_id: targetId, video: msg.video.file_id, caption: msg.caption || "" });
+    await tgApi(token, "sendVideo", { chat_id: targetUserId, video: msg.video.file_id, caption: msg.caption || "" });
   } else if (msg.voice) {
-    await tgApi(token, "sendVoice", { chat_id: targetId, voice: msg.voice.file_id });
+    await tgApi(token, "sendVoice", { chat_id: targetUserId, voice: msg.voice.file_id });
   } else if (msg.audio) {
-    await tgApi(token, "sendAudio", { chat_id: targetId, audio: msg.audio.file_id });
+    await tgApi(token, "sendAudio", { chat_id: targetUserId, audio: msg.audio.file_id });
   } else if (msg.document) {
-    await tgApi(token, "sendDocument", { chat_id: targetId, document: msg.document.file_id, caption: msg.caption || "" });
+    await tgApi(token, "sendDocument", { chat_id: targetUserId, document: msg.document.file_id, caption: msg.caption || "" });
   } else if (msg.sticker) {
-    await tgApi(token, "sendSticker", { chat_id: targetId, sticker: msg.sticker.file_id });
+    await tgApi(token, "sendSticker", { chat_id: targetUserId, sticker: msg.sticker.file_id });
+  } else if (msg.video_note) {
+    await tgApi(token, "sendVideoNote", { chat_id: targetUserId, video_note: msg.video_note.file_id });
   } else if (msg.animation) {
-    await tgApi(token, "sendAnimation", { chat_id: targetId, animation: msg.animation.file_id });
+    await tgApi(token, "sendAnimation", { chat_id: targetUserId, animation: msg.animation.file_id });
   } else if (msg.location) {
-    await tgApi(token, "sendLocation", { chat_id: targetId, latitude: msg.location.latitude, longitude: msg.location.longitude });
+    await tgApi(token, "sendLocation", { chat_id: targetUserId, latitude: msg.location.latitude, longitude: msg.location.longitude });
   } else {
-    await tgApi(token, "sendMessage", { chat_id: targetId, text: prefix + "[未知消息类型]" });
+    // 兜底：转发
+    await tgApi(token, "copyMessage", { chat_id: targetUserId, from_chat_id: env.ENV_SUPERGROUP_ID, message_id: msg.message_id });
   }
+}
+
+// ============ 管理员指令 ============
+async function handleAdminCommand(env, userId, threadId, text) {
+  const token = env.ENV_BOT_TOKEN;
+  const chatId = env.ENV_SUPERGROUP_ID;
+  const body = { chat_id: chatId, message_thread_id: threadId };
+
+  if (text === "/close") {
+    await env.KV.put(`closed:${userId}`, "1");
+    await tgApi(token, "closeForumTopic", { chat_id: chatId, message_thread_id: threadId });
+    await tgApi(token, "sendMessage", { ...body, text: "🚫 对话已关闭" });
+    return true;
+  }
+  if (text === "/open") {
+    await env.KV.delete(`closed:${userId}`);
+    await tgApi(token, "reopenForumTopic", { chat_id: chatId, message_thread_id: threadId });
+    await tgApi(token, "sendMessage", { ...body, text: "✅ 对话已恢复" });
+    return true;
+  }
+  if (text === "/ban") {
+    await env.KV.put(`banned:${userId}`, "1");
+    await tgApi(token, "sendMessage", { ...body, text: "🚫 用户已封禁" });
+    return true;
+  }
+  if (text === "/unban") {
+    await env.KV.delete(`banned:${userId}`);
+    await tgApi(token, "sendMessage", { ...body, text: "✅ 用户已解封" });
+    return true;
+  }
+  if (text === "/trust") {
+    await env.KV.put(`trusted:${userId}`, "1");
+    await tgApi(token, "sendMessage", { ...body, text: "🌟 已设置永久信任" });
+    return true;
+  }
+  if (text === "/reset") {
+    await env.KV.delete(`verified:${userId}`);
+    verifiedUsers.delete(userId);
+    await tgApi(token, "sendMessage", { ...body, text: "🔄 验证已重置" });
+    return true;
+  }
+  if (text === "/info") {
+    const info = `👤 用户信息\nUID: ${userId}\nTopic ID: ${threadId}\nLink: tg://user?id=${userId}`;
+    await tgApi(token, "sendMessage", { ...body, text: info });
+    return true;
+  }
+  return false;
 }
 
 // ============ 主处理 ============
@@ -155,12 +230,28 @@ export default {
     if (request.method === "GET") {
       return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
-
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
     const update = await request.json();
 
-    // 验证回调
+    // ---- 反应/表情转发 ----
+    if (update.message_reaction) {
+      const mr = update.message_reaction;
+      const chatId = String(mr.chat.id);
+      if (chatId === String(env.ENV_SUPERGROUP_ID) && mr.message_thread_id) {
+        const userId = await getUserIdByThread(env, mr.message_thread_id);
+        if (userId) {
+          const reactions = mr.new_reaction || [];
+          const emoji = reactions.map(r => r.emoji || r.type || "").filter(Boolean).join("");
+          if (emoji) {
+            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: userId, text: `👍 主人回应了你的消息：${emoji}` });
+          }
+        }
+      }
+      return new Response("ok");
+    }
+
+    // ---- 验证回调 ----
     if (update.callback_query) {
       const q = update.callback_query;
       const uid = q.from.id;
@@ -181,18 +272,47 @@ export default {
       return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "❌ 选择错误，请重试", show_alert: true }), { headers: { "Content-Type": "application/json" } });
     }
 
-    // 消息处理
+    // ---- 消息处理 ----
     if (update.message) {
       const msg = update.message;
       const uid = msg.from.id;
       const name = msg.from.first_name || "未知";
-      const text = msg.text;
+      const text = (msg.text || "").trim();
 
-      // 命令处理
-      if (text && text.startsWith("/")) {
+      // === 群组话题消息（主人在话题里发的消息） ===
+      if (msg.chat && String(msg.chat.id) === String(env.ENV_SUPERGROUP_ID) && msg.message_thread_id) {
+        const targetUserId = await getUserIdByThread(env, msg.message_thread_id);
+        if (!targetUserId) return new Response("ok");
+
+        // 管理员指令
+        if (text.startsWith("/")) {
+          await handleAdminCommand(env, targetUserId, msg.message_thread_id, text);
+          return new Response("ok");
+        }
+
+        // 检查是否关闭
+        const closed = await env.KV.get(`closed:${targetUserId}`);
+        if (closed) {
+          await tgApi(env.ENV_BOT_TOKEN, "sendMessage", {
+            chat_id: env.ENV_SUPERGROUP_ID,
+            message_thread_id: msg.message_thread_id,
+            text: "⚠️ 对话已关闭，请先 /open"
+          });
+          return new Response("ok");
+        }
+
+        // 直接发送给访客（不需要引用）
+        await replyToVisitor(env, targetUserId, msg);
+        return new Response("ok");
+      }
+
+      // === 私聊消息 ===
+
+      // 命令
+      if (text.startsWith("/")) {
         if (text === "/start") {
           if (String(uid) === String(env.ENV_OWNER_ID)) {
-            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 机器人已就绪。回复转发消息即可回复对应访客。" });
+            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 机器人已就绪。\n在群组话题里直接发消息即可回复访客。" });
           } else if (verifiedUsers.has(uid)) {
             await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "你已通过验证，直接发消息即可。" });
           } else {
@@ -205,21 +325,16 @@ export default {
         return new Response("ok");
       }
 
-      // 主人消息：回复转发的消息
+      // 主人私聊（不走话题）
       if (String(uid) === String(env.ENV_OWNER_ID)) {
-        if (msg.reply_to_message) {
-          const replied = msg.reply_to_message;
-          const sourceText = replied.text || replied.caption || "";
-          const targetId = extractUserId(sourceText);
-          if (targetId) {
-            await replyToVisitor(env, targetId, msg);
-            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: `✅ 已回复用户 ${targetId}` });
-          }
-        }
         return new Response("ok");
       }
 
-      // 未验证访客
+      // 封禁检查
+      const banned = await env.KV.get(`banned:${uid}`);
+      if (banned) return new Response("ok");
+
+      // 未验证
       if (!verifiedUsers.has(uid)) {
         const c = generateCaptcha();
         pendingUsers.set(uid, { answer: c.answer });
@@ -228,8 +343,8 @@ export default {
         return new Response("ok");
       }
 
-      // 已验证访客：转发给主人
-      await forwardToOwner(env, uid, name, msg);
+      // 已验证：转发到群组话题
+      await forwardToTopic(env, uid, msg.from, msg);
     }
 
     return new Response("ok");

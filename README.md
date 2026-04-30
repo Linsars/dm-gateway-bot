@@ -2,63 +2,57 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Linsars/dm-gateway-bot)
 
-基于 [ZenmoFeiShi/dm-gateway-bot](https://github.com/ZenmoFeiShi/dm-gateway-bot)，专为 Cloudflare Workers 设计。
+基于 [ZenmoFeiShi/dm-gateway-bot](https://github.com/ZenmoFeiShi/dm-gateway-bot) + [Linsars/telegram_private_chatbot](https://github.com/Linsars/telegram_private_chatbot)，专为 Cloudflare Workers 设计。
 
 ## ✨ 功能
 - Emoji Captcha 验证
-- 双向消息转发（文字、图片、视频、语音、贴纸、文件等）
-- 主人回复转发消息即可回复对应访客
+- 群组话题管理：每位访客自动创建独立话题
+- 主人在话题里直接发消息即可回复（不需要引用）
+- 支持点赞/贴表情转发给访客
+- 多媒体消息支持
+- 管理员指令：/close /open /ban /unban /trust /reset /info
 
 ## 🚀 首次部署
 
+### 前置准备
+1. 创建一个 Telegram **群组**，开启**话题功能**（Forum Topics）
+2. 把机器人拉入群组，设为**管理员**（需要管理话题权限）
+3. 获取群组 ID：桌面端右键群内消息 → 复制链接 → 链接里的 `-100xxxxxxxxxx` 就是群组 ID
+
 ### 1. 点击屎黄色按钮部署
 - 登录 Cloudflare
-- 填写 `ENV_BOT_TOKEN`（你的 Bot Token）
-- 填写 `ENV_OWNER_ID`（你的 Telegram 用户 ID）
+- 填写环境变量：
+  - `ENV_BOT_TOKEN`：Bot Token
+  - `ENV_OWNER_ID`：你的 Telegram 用户 ID
+  - `ENV_SUPERGROUP_ID`：群组 ID（-100 开头）
 - 创建或选择 KV 命名空间，绑定变量名填 `KV`
 - 点击部署
 
-### 2. 激活 Webhook
+### 2. 关闭群组隐私（重要）
+- 打开 @BotFather → /mybots → 选择机器人 → Settings → Group Privacy → Turn off
+
+### 3. 激活 Webhook
 - 访问 Worker 域名
 - 输入 Bot Token，点击"激活机器人"
 
+### 4. 绑定 KV 存储
+- Cloudflare → KV → 创建命名空间
+- Worker → 设置 → KV 命名空间绑定 → 添加
+- 变量名填 `KV`，选择刚创建的命名空间
+
 ## 🔄 更新 Worker 代码
 
-当本项目有新版本时，你可以通过以下方式更新：
+### 方法一：CF Dashboard（最简单）
+1. Worker → 编辑代码
+2. 复制最新的 [worker.js](https://raw.githubusercontent.com/Linsars/dm-gateway-bot/main/worker.js)
+3. 粘贴替换 → 保存并部署
 
-### 方法一：直接在 CF Dashboard 更新（最简单）
-1. 打开 [Cloudflare Dashboard](https://dash.cloudflare.com/)
-2. 找到你的 Worker → 点击"编辑代码"
-3. 打开本仓库最新的 `worker.js`：[点击查看](https://raw.githubusercontent.com/Linsars/dm-gateway-bot/main/worker.js)
-4. 复制全部内容，粘贴到编辑器中替换原代码
-5. 点击"保存并部署"
+### 方法二：Wrangler CLI
+```bash
+wrangler deploy
+```
 
-### 方法二：使用 Wrangler CLI（命令行）
-1. 安装 [Wrangler](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
-2. 克隆你的 Fork 仓库
-3. 用本仓库最新的 `worker.js` 替换本地文件
-4. 在 `wrangler.toml` 中确保 KV ID 正确
-5. 运行 `wrangler deploy`
-
-### 方法三：GitHub Actions 自动部署
-1. Fork 本仓库到你的 GitHub
-2. 在 `wrangler.toml` 中填入你的 KV 命名空间 ID
-3. 仓库 → Settings → Secrets → Actions → 添加：
-   - `CLOUDFLARE_API_TOKEN`：你的 Cloudflare API Token（需 Worker:Edit 权限）
-4. 创建 `.github/workflows/deploy.yml`：
-   ```yaml
-   name: Deploy
-   on:
-     push:
-       branches: [ main ]
-   jobs:
-     deploy:
-       runs-on: ubuntu-latest
-       steps:
-         - uses: actions/checkout@v4
-         - uses: cloudflare/wrangler-action@v3
-           with:
-             apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-             command: deploy --keep-vars
-   ```
-5. 推送到 main 分支即自动部署
+### 方法三：GitHub Actions
+1. Fork 本仓库，修改 `wrangler.toml` 中的 KV ID
+2. 添加 GitHub Secret `CLOUDFLARE_API_TOKEN`
+3. 创建 `.github/workflows/deploy.yml` 并推送
