@@ -4,9 +4,9 @@ compatibility_date = "2026-04-30"
 workers_dev = true
 
 [vars]
-ENV_BOT_TOKEN = "你的Bot Token"
 ENV_OWNER_ID = "你的Telegram用户ID"
 ENV_SUPERGROUP_ID = "你的群组ID（-100开头）"
+ENV_BOT_TOKEN = "你的Bot Token"
 
 [[kv_namespaces]]
 binding = "KV"
