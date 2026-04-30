@@ -1,11 +1,12 @@
 name = "dm-gateway-bot"
 main = "worker.js"
-compatibility_date = "2024-11-30"
+compatibility_date = "2026-04-30"
 workers_dev = true
 
 [vars]
-ENV_BOT_TOKEN = "123"
-ENV_OWNER_ID = "123"
+ENV_BOT_TOKEN = "123456:AAG***rxkx***LFPfzs
+"
+ENV_OWNER_ID = "67*****64"
 
 [[kv_namespaces]]
 binding = "KV"
