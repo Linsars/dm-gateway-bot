@@ -1,7 +1,5 @@
 # Telegram 私聊机器人 (Cloudflare Workers 版)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Linsars/dm-gateway-bot)
-
 基于 [ZenmoFeiShi/dm-gateway-bot](https://github.com/ZenmoFeiShi/dm-gateway-bot)，专为 Cloudflare Workers 设计。
 
 ## ✨ 功能
@@ -10,10 +8,12 @@
 - 多媒体支持
 
 ## 🚀 部署步骤
-
-### 1. 点击屎黄色按钮部署
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Linsars/dm-gateway-bot)
+### 1. 点击上面☝️屎黄色按钮【Deploy to Cloudflare】部署
 - 登录 Cloudflare
-- 填写环境变量：`ENV_BOT_TOKEN`（Bot Token）、`ENV_OWNER_ID`（你的 TG 用户 ID）
+- 填写环境变量：
+  - `ENV_BOT_TOKEN`（Bot Token）
+  - `ENV_OWNER_ID`（你的 TG 用户 ID）
 - 创建或选择 KV 命名空间，绑定变量名填 `KV`
 - 点击部署
 
