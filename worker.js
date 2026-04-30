@@ -47,7 +47,7 @@ const HTML_PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-// ============ 文字题库 ============
+// ============ 文字题库（50题） ============
 const TEXT_QUESTIONS = [
   { question: "冰融化后会变成什么？", correct: "水", options: ["水", "石头", "木头", "火"] },
   { question: "正常人有几只眼睛？", correct: "2", options: ["2", "1", "3", "4"] },
@@ -60,17 +60,69 @@ const TEXT_QUESTIONS = [
   { question: "鱼通常生活在哪里？", correct: "水里", options: ["水里", "树上", "土里", "火里"] },
   { question: "晴朗的天空通常是什么颜色？", correct: "蓝色", options: ["蓝色", "绿色", "红色", "紫色"] },
   { question: "太阳从哪个方向升起？", correct: "东方", options: ["东方", "西方", "南方", "北方"] },
-  { question: "小狗发出的叫声通常是？", correct: "汪汪", options: ["汪汪", "喵喵", "咩咩", "呱呱"] }
+  { question: "小狗发出的叫声通常是？", correct: "汪汪", options: ["汪汪", "喵喵", "咩咩", "呱呱"] },
+  { question: "10 加 5 等于几？", correct: "15", options: ["15", "10", "12", "20"] },
+  { question: "8 减 4 等于几？", correct: "4", options: ["4", "2", "3", "5"] },
+  { question: "我们用什么器官来听声音？", correct: "耳朵", options: ["耳朵", "眼睛", "鼻子", "嘴巴"] },
+  { question: "一年有几个月？", correct: "12", options: ["12", "10", "11", "13"] },
+  { question: "一周有几天？", correct: "7", options: ["7", "5", "6", "8"] },
+  { question: "地球是什么形状？", correct: "球形", options: ["球形", "方形", "三角形", "圆柱形"] },
+  { question: "水的化学式是什么？", correct: "H2O", options: ["H2O", "CO2", "O2", "NaCl"] },
+  { question: "中国有多少个省级行政区？", correct: "34", options: ["34", "30", "32", "36"] },
+  { question: "以下哪个是哺乳动物？", correct: "鲸鱼", options: ["鲸鱼", "鲨鱼", "鳄鱼", "蜥蜴"] },
+  { question: "光合作用需要什么气体？", correct: "二氧化碳", options: ["二氧化碳", "氧气", "氮气", "氢气"] },
+  { question: "月亮绕地球一圈大约多久？", correct: "一个月", options: ["一个月", "一天", "一周", "一年"] },
+  { question: "以下哪个是中国的传统节日？", correct: "春节", options: ["春节", "圣诞节", "感恩节", "复活节"] },
+  { question: "人体最大的器官是什么？", correct: "皮肤", options: ["皮肤", "肝脏", "大脑", "心脏"] },
+  { question: "哪种动物被称为百兽之王？", correct: "老虎", options: ["老虎", "狮子", "大象", "熊"] },
+  { question: "一打等于几个？", correct: "12", options: ["12", "10", "24", "6"] },
+  { question: "世界上最长的河流是？", correct: "尼罗河", options: ["尼罗河", "长江", "亚马逊河", "黄河"] },
+  { question: "铅笔芯主要成分是什么？", correct: "石墨", options: ["石墨", "铅", "碳", "铁"] },
+  { question: "WiFi 是什么的缩写？", correct: "无线保真", options: ["无线保真", "宽带网络", "光纤传输", "蓝牙连接"] },
+  { question: "一天有多少小时？", correct: "24", options: ["24", "12", "48", "36"] },
+  { question: "三角形内角和是多少度？", correct: "180", options: ["180", "360", "90", "270"] },
+  { question: "以下哪个是可再生能源？", correct: "太阳能", options: ["太阳能", "石油", "煤炭", "天然气"] },
+  { question: "蜜蜂采蜜后会酿成什么？", correct: "蜂蜜", options: ["蜂蜜", "蜂蜡", "花粉", "果酱"] },
+  { question: "人体有多少块骨头？", correct: "206", options: ["206", "180", "300", "150"] },
+  { question: "以下哪个行星最大？", correct: "木星", options: ["木星", "地球", "火星", "土星"] },
+  { question: "彩虹有几种颜色？", correct: "7", options: ["7", "5", "6", "8"] },
+  { question: "向日葵会朝向哪个方向？", correct: "太阳", options: ["太阳", "月亮", "北方", "南方"] },
+  { question: "大象的鼻子有什么功能？", correct: "呼吸和抓取", options: ["呼吸和抓取", "只能呼吸", "只能抓取", "装饰用"] },
+  { question: "铁生锈需要什么？", correct: "水和氧气", options: ["水和氧气", "只需要水", "只需要氧气", "阳光"] },
+  { question: "哪种鸟不会飞？", correct: "企鹅", options: ["企鹅", "麻雀", "鸽子", "燕子"] },
+  { question: "以下哪个是哺乳动物的特征？", correct: "胎生", options: ["胎生", "卵生", "有鳞片", "有羽毛"] },
+  { question: "地球自转一圈需要多久？", correct: "24小时", options: ["24小时", "12小时", "365天", "30天"] },
+  { question: "糖溶解在水里会怎样？", correct: "消失不见", options: ["消失不见", "沉到水底", "浮在水面", "变色"] },
+  { question: "以下哪个是中国的首都？", correct: "北京", options: ["北京", "上海", "广州", "深圳"] },
+  { question: "鸡蛋是哪种动物的卵？", correct: "鸡", options: ["鸡", "鸭", "鹅", "鸟"] },
+  { question: "镜子利用的是什么原理？", correct: "光的反射", options: ["光的反射", "光的折射", "光的散射", "光的吸收"] },
+  { question: "人正常体温大约是多少度？", correct: "36.5", options: ["36.5", "35", "38", "40"] },
+  { question: "冰水混合物的温度是？", correct: "0度", options: ["0度", "10度", "-10度", "100度"] },
+  { question: "以下哪个交通工具最快？", correct: "飞机", options: ["飞机", "火车", "汽车", "轮船"] }
 ];
 
-// ============ Emoji 题库 ============
+// ============ Emoji 题库（20个） ============
 const EMOJI_CAPTCHAS = [
   { question: "Tap 🐶", answer: "🐶" },
   { question: "Tap 🐱", answer: "🐱" },
   { question: "Tap 🐼", answer: "🐼" },
   { question: "Tap 🦊", answer: "🦊" },
   { question: "Tap 🐸", answer: "🐸" },
-  { question: "Tap 🦁", answer: "🦁" }
+  { question: "Tap 🦁", answer: "🦁" },
+  { question: "Tap 🐮", answer: "🐮" },
+  { question: "Tap 🐷", answer: "🐷" },
+  { question: "Tap 🐵", answer: "🐵" },
+  { question: "Tap 🐰", answer: "🐰" },
+  { question: "Tap 🐻", answer: "🐻" },
+  { question: "Tap 🐧", answer: "🐧" },
+  { question: "Tap 🦄", answer: "🦄" },
+  { question: "Tap 🐙", answer: "🐙" },
+  { question: "Tap 🦋", answer: "🦋" },
+  { question: "Tap 🐳", answer: "🐳" },
+  { question: "Tap 🦜", answer: "🦜" },
+  { question: "Tap 🐢", answer: "🐢" },
+  { question: "Tap 🦔", answer: "🦔" },
+  { question: "Tap 🐲", answer: "🐲" }
 ];
 
 // ============ 工具函数 ============
