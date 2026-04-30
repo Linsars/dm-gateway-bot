@@ -1,11 +1,46 @@
 // Cloudflare Worker: Telegram 私聊中转机器人 (Emoji Captcha 验证)
 // 基于 ZenmoFeiShi/dm-gateway-bot 项目
 
-// 环境变量（从 Cloudflare 环境变量读取）
-// const BOT_TOKEN = "your_bot_token_here";
-// const OWNER_ID = "your_owner_id_here";
+// ============ HTML 页面 ============
+const HTML_PAGE = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram 机器人</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f9f9f9; }
+    .box { background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .url { background: #f0f0f0; padding: 10px; border-radius: 5px; font-family: monospace; word-break: break-all; font-size: 13px; }
+    ul { text-align: left; display: inline-block; }
+    .tip { font-size: 12px; color: #999; margin-top: 15px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>🤖 Telegram 机器人部署完成</h1>
+    <p>Webhook 地址：</p>
+    <p class="url" id="w"></p>
+    <p>请在浏览器访问以下地址激活（替换 YOUR_TOKEN 为你的 Bot Token）：</p>
+    <p class="url">https://api.telegram.org/bot<strong>YOUR_TOKEN</strong>/setWebhook?url=<span id="w2"></span></p>
+    <p>激活成功后返回 <code>{"ok":true}</code></p>
+    <hr>
+    <p>激活后机器人即可工作：</p>
+    <ul>
+      <li>访客发送 <code>/start</code> → 点击表情验证 → 发送消息</li>
+      <li>主人直接私聊即可接收</li>
+    </ul>
+    <p class="tip">请勿将 Bot Token 暴露给他人</p>
+  </div>
+  <script>
+    var u = location.origin;
+    document.getElementById("w").textContent = u;
+    document.getElementById("w2").textContent = u;
+  </script>
+</body>
+</html>`;
 
-// Emoji Captcha 题库
+// ============ Emoji Captcha 题库 ============
 const CAPTCHAS = [
   { question: "Tap 🐶", answer: "🐶" },
   { question: "Tap 🐱", answer: "🐱" },
@@ -15,180 +50,108 @@ const CAPTCHAS = [
   { question: "Tap 🦁", answer: "🦁" }
 ];
 
-// 存储验证状态
+// ============ 状态存储 ============
 const pendingUsers = new Map();
 const verifiedUsers = new Set();
 
-// 生成验证码
+// ============ 工具函数 ============
 function generateCaptcha() {
-  const captcha = CAPTCHAS[Math.floor(Math.random() * CAPTCHAS.length)];
-  const emojis = ["🐶", "🐱", "🐼", "🦊", "🐸", "🦁"];
-  const options = emojis.sort(() => Math.random() - 0.5);
-  return {
-    question: captcha.question,
-    answer: captcha.answer,
-    options: options
-  };
+  const c = CAPTCHAS[Math.floor(Math.random() * CAPTCHAS.length)];
+  const options = [...CAPTCHAS.map(x => x.answer)].sort(() => Math.random() - 0.5);
+  return { question: c.question, answer: c.answer, options };
 }
 
-// 发送消息给主人
-async function forwardToOwner(env, userId, userName, message) {
-  const header = `💬 来自 ${userName} 的消息：\n用户 ID: ${userId}\n`;
-  let text = header;
-  
-  if (message.text) {
-    text += `\n${message.text}`;
-  }
-  
-  await sendMessage(env.ENV_BOT_TOKEN, OWNER_ID, text);
-}
-
-// 发送消息
-async function sendMessage(token, chatId, text) {
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  const response = await fetch(url, {
+async function sendMessage(token, chatId, text, extra) {
+  const body = { chat_id: chatId, text };
+  if (extra) Object.assign(body, extra);
+  return fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: text })
+    body: JSON.stringify(body)
   });
-  return response.json();
 }
 
-// 主处理函数
+async function forwardToOwner(env, userId, userName, message) {
+  let text = `💬 来自 ${userName} 的消息：\n用户 ID: ${userId}\n`;
+  if (message.text) text += `\n${message.text}`;
+  await sendMessage(env.ENV_BOT_TOKEN, env.ENV_OWNER_ID, text);
+}
+
+// ============ 主处理 ============
 export default {
-  async fetch(request, env, ctx) {
-    // 处理 GET 请求（浏览器访问）
+  async fetch(request, env) {
+    // GET → 显示激活页面
     if (request.method === "GET") {
-      const url = new URL(request.url);
-      const webhookUrl = `${url.protocol}//${url.host}`;
-      
-      return new Response(`
-        <html>
-          <head><title>Telegram 机器人部署完成</title></head>
-          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1>🤖 Telegram 机器人部署完成</h1>
-            <p>Webhook 地址：<strong>${webhookUrl}</strong></p>
-            <p>请在浏览器访问以下地址激活（替换 YOUR_TOKEN 为你的 Bot Token）：</p>
-            <p style="background: #f5f5f5; padding: 10px; border-radius: 5px; font-family: monospace;">
-              https://api.telegram.org/bot<strong>YOUR_TOKEN</strong>/setWebhook?url=${webhookUrl}
-            </p>
-            <p>激活成功后会返回 <code>{"ok":true}</code></p>
-            <hr>
-            <p>激活后，机器人即可正常工作：</p>
-            <ul style="text-align: left; display: inline-block;">
-              <li>访客发送 <code>/start</code> → 点击正确的表情 → 验证通过 → 发送消息</li>
-              <li>主人直接私聊即可接收消息</li>
-            </ul>
-          </body>
-        </html>
-      `, {
-        headers: { "Content-Type": "text/html" }
-      });
+      return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
-    // 处理 POST 请求（Telegram Webhook）
+    // 只接受 POST
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405 });
     }
 
     const update = await request.json();
 
-    // 处理回调查询（验证码点击）
+    // 验证回调
     if (update.callback_query) {
-      const query = update.callback_query;
-      const userId = query.from.id;
-      const data = query.data;
+      const q = update.callback_query;
+      const uid = q.from.id;
+      const data = q.data;
+      if (!data.startsWith("verify:")) return new Response("ok");
 
-      if (data.startsWith("verify:")) {
-        const selected = data.split(":")[1];
-        const pending = pendingUsers.get(userId);
+      const selected = data.split(":")[1];
+      const pending = pendingUsers.get(uid);
 
-        if (!pending) {
-          return new Response(JSON.stringify({
-            method: "answerCallbackQuery",
-            callback_query_id: query.id,
-            text: "验证已超时，请重新发送 /start"
-          }), { headers: { "Content-Type": "application/json" } });
-        }
-
-        if (selected === pending.answer) {
-          verifiedUsers.add(userId);
-          pendingUsers.delete(userId);
-          return new Response(JSON.stringify({
-            method: "answerCallbackQuery",
-            callback_query_id: query.id,
-            text: "✅ 验证通过！"
-          }), { headers: { "Content-Type": "application/json" } });
-        } else {
-          return new Response(JSON.stringify({
-            method: "answerCallbackQuery",
-            callback_query_id: query.id,
-            text: "❌ 选择错误，请重试",
-            show_alert: true
-          }), { headers: { "Content-Type": "application/json" } });
-        }
+      if (!pending) {
+        return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "验证已过期，请重发 /start" }), { headers: { "Content-Type": "application/json" } });
       }
+      if (selected === pending.answer) {
+        verifiedUsers.add(uid);
+        pendingUsers.delete(uid);
+        return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "✅ 验证通过！" }), { headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "❌ 选择错误，请重试", show_alert: true }), { headers: { "Content-Type": "application/json" } });
     }
 
-    // 处理消息
+    // 消息处理
     if (update.message) {
-      const message = update.message;
-      const userId = message.from.id;
-      const userName = message.from.first_name || "未知";
-      const text = message.text;
+      const msg = update.message;
+      const uid = msg.from.id;
+      const name = msg.from.first_name || "未知";
+      const text = msg.text;
 
-      // 忽略命令
       if (text && text.startsWith("/")) {
         if (text === "/start") {
-          if (userId == OWNER_ID) {
-            await sendMessage(env.ENV_BOT_TOKEN, userId, "你是管理员，可以直接发消息给我，我会帮你转发。");
-          } else if (verifiedUsers.has(userId)) {
-            await sendMessage(env.ENV_BOT_TOKEN, userId, "你已经通过验证，直接发消息给我即可转达给主人。");
+          if (String(uid) === String(env.ENV_OWNER_ID)) {
+            await sendMessage(env.ENV_BOT_TOKEN, uid, "你是管理员，可以直接发消息给我，我会帮你转发。");
+          } else if (verifiedUsers.has(uid)) {
+            await sendMessage(env.ENV_BOT_TOKEN, uid, "你已通过验证，直接发消息即可。");
           } else {
-            const captcha = generateCaptcha();
-            pendingUsers.set(userId, { answer: captcha.answer });
-            
-            // 创建按钮
-            const buttons = captcha.options.map(e => ({
-              text: e,
-              callback_data: `verify:${e}`
-            }));
-            
-            await sendMessage(env.ENV_BOT_TOKEN, userId, `🤖 你想联系主人，请先验证你是真人：\n\n${captcha.question}`, {
-              reply_markup: { inline_keyboard: [buttons] }
-            });
+            const c = generateCaptcha();
+            pendingUsers.set(uid, { answer: c.answer });
+            const buttons = c.options.map(e => ({ text: e, callback_data: `verify:${e}` }));
+            await sendMessage(env.ENV_BOT_TOKEN, uid, `🤖 请先验证你是真人：\n\n${c.question}`, { reply_markup: { inline_keyboard: [buttons] } });
           }
         }
-        return new Response(JSON.stringify({ method: "sendMessage" }), { headers: { "Content-Type": "application/json" } });
+        return new Response("ok");
       }
 
-      // 管理员逻辑
-      if (userId == OWNER_ID) {
-        // 处理回复逻辑
-        return new Response(JSON.stringify({ method: "sendMessage" }), { headers: { "Content-Type": "application/json" } });
+      if (String(uid) === String(env.ENV_OWNER_ID)) {
+        return new Response("ok");
       }
 
-      // 未验证用户
-      if (!verifiedUsers.has(userId)) {
-        const captcha = generateCaptcha();
-        pendingUsers.set(userId, { answer: captcha.answer });
-        
-        const buttons = captcha.options.map(e => ({
-          text: e,
-          callback_data: `verify:${e}`
-        }));
-        
-        await sendMessage(env.ENV_BOT_TOKEN, userId, `🤖 请先验证你是真人：\n\n${captcha.question}`, {
-          reply_markup: { inline_keyboard: [buttons] }
-        });
-        return new Response(JSON.stringify({ method: "sendMessage" }), { headers: { "Content-Type": "application/json" } });
+      if (!verifiedUsers.has(uid)) {
+        const c = generateCaptcha();
+        pendingUsers.set(uid, { answer: c.answer });
+        const buttons = c.options.map(e => ({ text: e, callback_data: `verify:${e}` }));
+        await sendMessage(env.ENV_BOT_TOKEN, uid, `🤖 请先验证你是真人：\n\n${c.question}`, { reply_markup: { inline_keyboard: [buttons] } });
+        return new Response("ok");
       }
 
-      // 已验证用户，转发给主人
-      await forwardToOwner(env, userId, userName, message);
-      await sendMessage(env.ENV_BOT_TOKEN, userId, "✅ 已发送给主人，等待回复...");
+      await forwardToOwner(env, uid, name, msg);
+      await sendMessage(env.ENV_BOT_TOKEN, uid, "✅ 已发送给主人，等待回复...");
     }
 
-    return new Response(JSON.stringify({ status: "ok" }), { headers: { "Content-Type": "application/json" } });
+    return new Response("ok");
   }
 };
