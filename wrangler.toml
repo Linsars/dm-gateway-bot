@@ -9,3 +9,4 @@ ENV_OWNER_ID = "你的Telegram用户ID"
 
 [[kv_namespaces]]
 binding = "KV"
+#id = "你的KV命名空间ID"
