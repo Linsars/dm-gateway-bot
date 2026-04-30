@@ -1,9 +1,9 @@
 // Cloudflare Worker: Telegram 私聊中转机器人 (Emoji Captcha 验证)
 // 基于 ZenmoFeiShi/dm-gateway-bot 项目
 
-// 环境变量
-const BOT_TOKEN = "your_bot_token_here";
-const OWNER_ID = "your_owner_id_here";
+// 环境变量（从 Cloudflare 环境变量读取）
+// const BOT_TOKEN = "your_bot_token_here";
+// const OWNER_ID = "your_owner_id_here";
 
 // Emoji Captcha 题库
 const CAPTCHAS = [
@@ -40,7 +40,7 @@ async function forwardToOwner(env, userId, userName, message) {
     text += `\n${message.text}`;
   }
   
-  await sendMessage(env.BOT_TOKEN, OWNER_ID, text);
+  await sendMessage(env.ENV_BOT_TOKEN, OWNER_ID, text);
 }
 
 // 发送消息
@@ -59,13 +59,33 @@ export default {
   async fetch(request, env, ctx) {
     // 处理 GET 请求（浏览器访问）
     if (request.method === "GET") {
+      const url = new URL(request.url);
+      const webhookUrl = `${url.protocol}//${url.host}`;
+      
       return new Response(`
         <html>
-          <head><title>Telegram 机器人</title></head>
+          <head><title>Telegram 机器人部署完成</title></head>
           <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-            <h1>🤖 Telegram 机器人运行中</h1>
-            <p>这是一个 Telegram 机器人，通过 Webhook 接收消息。</p>
-            <p>请通过 Telegram 客户端与机器人交互。</p>
+            <h1>🤖 Telegram 机器人部署完成</h1>
+            <p>机器人已部署到：<strong>${webhookUrl}</strong></p>
+            <p>请激活 Webhook 以开始接收消息：</p>
+            <p>
+              <a href="https://api.telegram.org/bot${env.ENV_BOT_TOKEN}/setWebhook?url=${webhookUrl}" 
+                 target="_blank" 
+                 style="background-color: #0088cc; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
+                点击激活 Webhook
+              </a>
+            </p>
+            <p style="font-size: 12px; color: #666;">
+              或者手动访问：<br>
+              https://api.telegram.org/bot${env.ENV_BOT_TOKEN}/setWebhook?url=${webhookUrl}
+            </p>
+            <hr>
+            <p>激活后，机器人即可正常工作：</p>
+            <ul style="text-align: left; display: inline-block;">
+              <li>访客发送 <code>/start</code> → 点击正确的表情 → 验证通过 → 发送消息</li>
+              <li>主人直接私聊即可接收消息</li>
+            </ul>
           </body>
         </html>
       `, {
@@ -128,9 +148,9 @@ export default {
       if (text && text.startsWith("/")) {
         if (text === "/start") {
           if (userId == OWNER_ID) {
-            await sendMessage(env.BOT_TOKEN, userId, "你是管理员，可以直接发消息给我，我会帮你转发。");
+            await sendMessage(env.ENV_BOT_TOKEN, userId, "你是管理员，可以直接发消息给我，我会帮你转发。");
           } else if (verifiedUsers.has(userId)) {
-            await sendMessage(env.BOT_TOKEN, userId, "你已经通过验证，直接发消息给我即可转达给主人。");
+            await sendMessage(env.ENV_BOT_TOKEN, userId, "你已经通过验证，直接发消息给我即可转达给主人。");
           } else {
             const captcha = generateCaptcha();
             pendingUsers.set(userId, { answer: captcha.answer });
@@ -141,7 +161,7 @@ export default {
               callback_data: `verify:${e}`
             }));
             
-            await sendMessage(env.BOT_TOKEN, userId, `🤖 你想联系主人，请先验证你是真人：\n\n${captcha.question}`, {
+            await sendMessage(env.ENV_BOT_TOKEN, userId, `🤖 你想联系主人，请先验证你是真人：\n\n${captcha.question}`, {
               reply_markup: { inline_keyboard: [buttons] }
             });
           }
@@ -165,7 +185,7 @@ export default {
           callback_data: `verify:${e}`
         }));
         
-        await sendMessage(env.BOT_TOKEN, userId, `🤖 请先验证你是真人：\n\n${captcha.question}`, {
+        await sendMessage(env.ENV_BOT_TOKEN, userId, `🤖 请先验证你是真人：\n\n${captcha.question}`, {
           reply_markup: { inline_keyboard: [buttons] }
         });
         return new Response(JSON.stringify({ method: "sendMessage" }), { headers: { "Content-Type": "application/json" } });
@@ -173,7 +193,7 @@ export default {
 
       // 已验证用户，转发给主人
       await forwardToOwner(env, userId, userName, message);
-      await sendMessage(env.BOT_TOKEN, userId, "✅ 已发送给主人，等待回复...");
+      await sendMessage(env.ENV_BOT_TOKEN, userId, "✅ 已发送给主人，等待回复...");
     }
 
     return new Response(JSON.stringify({ status: "ok" }), { headers: { "Content-Type": "application/json" } });
