@@ -10,4 +10,4 @@ ENV_OWNER_ID = "67*****64"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "your_kv_namespace_id"
+#id = "把id前面的#号去掉并用你的KV空间id取代这行字"
