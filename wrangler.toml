@@ -1,11 +1,7 @@
-name = "dm-xueziy-bot"
+name = "dm-gateway-bot"
 main = "worker.js"
 compatibility_date = "2024-11-30"
 workers_dev = true
-
-[vars]
-ENV_BOT_TOKEN = "8622981456:AAGpdKQbm7TsNFpn16aqrxkx0EG8sLFPfzs"
-ENV_OWNER_ID = "6708985864"
 
 [[kv_namespaces]]
 binding = "KV"

@@ -3,6 +3,7 @@ name: Deploy to Cloudflare Workers
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -15,4 +16,4 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: deploy --name dm-xueziy-bot
+          command: deploy --var ENV_BOT_TOKEN:${{ secrets.ENV_BOT_TOKEN }} --var ENV_OWNER_ID:${{ secrets.ENV_OWNER_ID }}
