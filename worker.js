@@ -10,32 +10,39 @@ const HTML_PAGE = `<!DOCTYPE html>
   <title>Telegram 机器人</title>
   <style>
     body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f9f9f9; }
-    .box { background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .url { background: #f0f0f0; padding: 10px; border-radius: 5px; font-family: monospace; word-break: break-all; font-size: 13px; }
-    ul { text-align: left; display: inline-block; }
+    .box { background: white; padding: 30px; border-radius: 10px; max-width: 460px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; }
+    button { background: #0088cc; color: white; border: none; padding: 12px 30px; border-radius: 5px; font-size: 16px; cursor: pointer; margin-top: 10px; }
+    button:hover { background: #006699; }
     .tip { font-size: 12px; color: #999; margin-top: 15px; }
+    #result { margin-top: 15px; padding: 10px; border-radius: 5px; display: none; }
+    .ok { background: #d4edda; color: #155724; }
+    .err { background: #f8d7da; color: #721c24; }
   </style>
 </head>
 <body>
   <div class="box">
-    <h1>🤖 Telegram 机器人部署完成</h1>
-    <p>Webhook 地址：</p>
-    <p class="url" id="w"></p>
-    <p>请在浏览器访问以下地址激活（替换 YOUR_TOKEN 为你的 Bot Token）：</p>
-    <p class="url">https://api.telegram.org/bot<strong>YOUR_TOKEN</strong>/setWebhook?url=<span id="w2"></span></p>
-    <p>激活成功后返回 <code>{"ok":true}</code></p>
-    <hr>
-    <p>激活后机器人即可工作：</p>
-    <ul>
-      <li>访客发送 <code>/start</code> → 点击表情验证 → 发送消息</li>
-      <li>主人直接私聊即可接收</li>
-    </ul>
-    <p class="tip">请勿将 Bot Token 暴露给他人</p>
+    <h1>🤖 Telegram 机器人</h1>
+    <p>输入你的 Bot Token 激活 Webhook：</p>
+    <input type="text" id="token" placeholder="123456:ABC-DEF..." />
+    <br>
+    <button onclick="activate()">激活机器人</button>
+    <div id="result"></div>
+    <p class="tip">Token 仅在浏览器本地使用，不会上传到服务器</p>
   </div>
   <script>
-    var u = location.origin;
-    document.getElementById("w").textContent = u;
-    document.getElementById("w2").textContent = u;
+    async function activate() {
+      var token = document.getElementById("token").value.trim();
+      var result = document.getElementById("result");
+      if (!token) { result.style.display="block"; result.className="err"; result.textContent="请输入 Token"; return; }
+      result.style.display="block"; result.className=""; result.textContent="正在激活...";
+      try {
+        var resp = await fetch("https://api.telegram.org/bot"+token+"/setWebhook?url="+encodeURIComponent(location.origin));
+        var data = await resp.json();
+        if (data.ok) { result.className="ok"; result.textContent="✅ 激活成功！机器人已上线。"; }
+        else { result.className="err"; result.textContent="❌ 激活失败："+data.description; }
+      } catch(e) { result.className="err"; result.textContent="❌ 请求失败："+e.message; }
+    }
   </script>
 </body>
 </html>`;
