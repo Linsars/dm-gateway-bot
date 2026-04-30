@@ -16,4 +16,4 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: deploy --keep-vars
+          command: deploy --config wrangler-auto.toml --keep-vars
