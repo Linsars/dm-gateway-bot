@@ -1,0 +1,14 @@
+name = "dm-gateway-bot"
+main = "worker.js"
+compatibility_date = "2024-11-30"
+workers_dev = true
+
+[vars]
+# 环境变量占位符（在 Cloudflare Dashboard 中设置实际值）
+ENV_BOT_TOKEN = "your_bot_token_here"
+ENV_OWNER_ID = "your_owner_id_here"
+
+# KV 命名空间绑定
+[[kv_namespaces]]
+binding = "KV"
+# id = "your_kv_namespace_id"  # 在 Cloudflare Dashboard 中创建后取消注释并填写
