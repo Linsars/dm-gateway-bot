@@ -1,5 +1,4 @@
 // Cloudflare Worker: Telegram 私聊中转机器人
-// 基于 ZenmoFeiShi/dm-gateway-bot + Linsars/telegram_private_chatbot
 
 // ============ HTML 激活页面 ============
 const HTML_PAGE = `<!DOCTYPE html>
@@ -104,7 +103,8 @@ const TEXT_QUESTIONS = [
 // ============ Emoji 题库（20个，每次随机抽8个含正确答案） ============
 const EMOJI_POOL = [
   "🐶","🐱","🐼","🦊","🐸","🦁","🐮","🐷","🐵","🐰",
-  "🐻","🐧","🦄","🐙","🦋","🐳","🦜","🐢","🦔","🐲"
+  "🐻","🐧","🦄","🐙","🦋","🐳","🦜","🐢","🦔","🐲",
+  "🍏","🍋","🍇”,"🍒”,"🥥”,"🥑”,"🥒”,"🍋‍🟩”,"🍓”,"🍌”
 ];
 
 // ============ 工具函数 ============
@@ -117,11 +117,10 @@ function generateTextQuestion() {
 
 function generateEmojiCaptcha() {
   const answer = EMOJI_POOL[Math.floor(Math.random() * EMOJI_POOL.length)];
-  // 从其余 emoji 中随机选 7 个 + 正确答案 = 8 个
   const others = EMOJI_POOL.filter(e => e !== answer);
   const distractors = shuffle(others).slice(0, 7);
   const options = shuffle([answer, ...distractors]);
-  return { question: `Tap ${answer}`, answer, options };
+  return { question: `请点击下方表情选项里的 ${answer}`, answer, options };
 }
 
 async function tgApi(token, method, body) {
@@ -133,7 +132,6 @@ async function tgApi(token, method, body) {
   return resp.json();
 }
 
-// 发送消息并返回消息 ID（用于后续删除）
 async function tgApiWithId(token, method, body) {
   const resp = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
@@ -166,10 +164,8 @@ async function getUserIdByThread(env, threadId) {
   return uid ? Number(uid) : null;
 }
 
-// 全局 waitUntil 引用
 let _waitUntil = null;
 
-// 30秒后删除消息（用 waitUntil 保活）
 function scheduleDelete(token, chatId, messageId) {
   const p = new Promise(resolve => setTimeout(async () => {
     try {
@@ -192,7 +188,6 @@ async function notifyOwner(env, userId, from, text) {
   }
 }
 
-// ============ 发送验证题 ============
 async function sendTextVerify(env, userId, from) {
   const q = generateTextQuestion();
   await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "text", answer: q.answer }), { expirationTtl: 300 });
@@ -202,10 +197,9 @@ async function sendTextVerify(env, userId, from) {
     text: `🤖 请回答以下问题：\n\n${q.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
-  // 30秒后自毁
+
   if (res.ok && res.result) scheduleDelete(env.ENV_BOT_TOKEN, userId, res.result.message_id);
-  // 通知主人
-  await notifyOwner(env, userId, from, `👤 新访客：${from.first_name || "未知"}\nUID: ${userId}\n正在答题...`);
+  await notifyOwner(env, userId, from, `👤 新访客：${from.first_name || "未知"}\nUID: ${userId}\n试图答题...`);
 }
 
 async function sendEmojiVerify(env, userId, from) {
@@ -214,13 +208,12 @@ async function sendEmojiVerify(env, userId, from) {
   const buttons = c.options.map(e => ({ text: e, callback_data: `v:emoji:${e}` }));
   const res = await tgApiWithId(env.ENV_BOT_TOKEN, "sendMessage", {
     chat_id: userId,
-    text: `⚠️ 文字验证失败，再来一个：\n\n${c.question}`,
+    text: `竟然没过常识题🤔表情会对吧：\n\n${c.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
   if (res.ok && res.result) scheduleDelete(env.ENV_BOT_TOKEN, userId, res.result.message_id);
 }
 
-// ============ 转发消息 ============
 async function forwardToTopic(env, userId, from, msg) {
   const topic = await getOrCreateTopic(env, userId, from);
   const token = env.ENV_BOT_TOKEN;
@@ -254,7 +247,6 @@ async function replyToVisitor(env, targetUserId, msg) {
   else await tgApi(token, "copyMessage", { chat_id: targetUserId, from_chat_id: env.ENV_SUPERGROUP_ID, message_id: msg.message_id });
 }
 
-// ============ 管理员指令 ============
 async function handleAdminCommand(env, userId, threadId, text) {
   const token = env.ENV_BOT_TOKEN;
   const chatId = env.ENV_SUPERGROUP_ID;
@@ -373,13 +365,11 @@ export default {
       return new Response("ok");
     }
 
-    // ---- 消息处理 ----
     if (update.message) {
       const msg = update.message;
       const uid = msg.from.id;
       const text = (msg.text || "").trim();
-
-      // === 群组话题消息 ===
+l
       if (msg.chat && String(msg.chat.id) === String(env.ENV_SUPERGROUP_ID) && msg.message_thread_id) {
         const targetUserId = await getUserIdByThread(env, msg.message_thread_id);
         if (!targetUserId) return new Response("ok");
@@ -408,9 +398,8 @@ export default {
 
       // 已验证
       if (trusted || await env.KV.get(`verified:${uid}`)) {
-        // 验证通过后再发 /start 不重新验证
         if (text === "/start") {
-          await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 你已通过验证，直接发消息即可。" });
+          await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 大佬🥰验证过了就别调戏bot啦" });
           return new Response("ok");
         }
         await forwardToTopic(env, uid, msg.from, msg);
@@ -436,7 +425,7 @@ export default {
       if (verifyState) {
         await env.KV.put(`banned:${uid}`, "1", { expirationTtl: 3600 });
         await env.KV.delete(`verify:${uid}`);
-        await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 请认真答题，你已被封禁1小时。" });
+        await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 不答题乱发啥？奖励小黑屋1小时！" });
         await notifyOwner(env, uid, msg.from, `🚫 访客 ${msg.from.first_name || "未知"} (${uid}) 验证中乱发消息，已 ban 1小时`);
         return new Response("ok");
       }
