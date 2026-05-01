@@ -1,4 +1,4 @@
-name = "tg-o2o-bot"
+name = "dm-gateway-bot"
 main = "worker.js"
 compatibility_date = "2026-04-30"
 workers_dev = true
