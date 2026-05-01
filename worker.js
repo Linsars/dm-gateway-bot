@@ -101,34 +101,14 @@ const TEXT_QUESTIONS = [
   { question: "以下哪个交通工具最快？", correct: "飞机", options: ["飞机", "火车", "汽车", "轮船"] }
 ];
 
-// ============ Emoji 题库（20个） ============
-const EMOJI_CAPTCHAS = [
-  { question: "Tap 🐶", answer: "🐶" },
-  { question: "Tap 🐱", answer: "🐱" },
-  { question: "Tap 🐼", answer: "🐼" },
-  { question: "Tap 🦊", answer: "🦊" },
-  { question: "Tap 🐸", answer: "🐸" },
-  { question: "Tap 🦁", answer: "🦁" },
-  { question: "Tap 🐮", answer: "🐮" },
-  { question: "Tap 🐷", answer: "🐷" },
-  { question: "Tap 🐵", answer: "🐵" },
-  { question: "Tap 🐰", answer: "🐰" },
-  { question: "Tap 🐻", answer: "🐻" },
-  { question: "Tap 🐧", answer: "🐧" },
-  { question: "Tap 🦄", answer: "🦄" },
-  { question: "Tap 🐙", answer: "🐙" },
-  { question: "Tap 🦋", answer: "🦋" },
-  { question: "Tap 🐳", answer: "🐳" },
-  { question: "Tap 🦜", answer: "🦜" },
-  { question: "Tap 🐢", answer: "🐢" },
-  { question: "Tap 🦔", answer: "🦔" },
-  { question: "Tap 🐲", answer: "🐲" }
+// ============ Emoji 题库（20个，每次随机抽8个含正确答案） ============
+const EMOJI_POOL = [
+  "🐶","🐱","🐼","🦊","🐸","🦁","🐮","🐷","🐵","🐰",
+  "🐻","🐧","🦄","🐙","🦋","🐳","🦜","🐢","🦔","🐲"
 ];
 
 // ============ 工具函数 ============
-function shuffle(arr) {
-  return [...arr].sort(() => Math.random() - 0.5);
-}
+function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
 
 function generateTextQuestion() {
   const q = TEXT_QUESTIONS[Math.floor(Math.random() * TEXT_QUESTIONS.length)];
@@ -136,8 +116,12 @@ function generateTextQuestion() {
 }
 
 function generateEmojiCaptcha() {
-  const c = EMOJI_CAPTCHAS[Math.floor(Math.random() * EMOJI_CAPTCHAS.length)];
-  return { question: c.question, answer: c.answer, options: shuffle(EMOJI_CAPTCHAS.map(x => x.answer)) };
+  const answer = EMOJI_POOL[Math.floor(Math.random() * EMOJI_POOL.length)];
+  // 从其余 emoji 中随机选 7 个 + 正确答案 = 8 个
+  const others = EMOJI_POOL.filter(e => e !== answer);
+  const distractors = shuffle(others).slice(0, 7);
+  const options = shuffle([answer, ...distractors]);
+  return { question: `Tap ${answer}`, answer, options };
 }
 
 async function tgApi(token, method, body) {
@@ -149,6 +133,17 @@ async function tgApi(token, method, body) {
   return resp.json();
 }
 
+// 发送消息并返回消息 ID（用于后续删除）
+async function tgApiWithId(token, method, body) {
+  const resp = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await resp.json();
+  return data;
+}
+
 function buildTopicTitle(from) {
   const name = [from.first_name || "", from.last_name || ""].join(" ").trim().substring(0, 50);
   const username = from.username ? `@${from.username}` : "";
@@ -158,13 +153,8 @@ function buildTopicTitle(from) {
 async function getOrCreateTopic(env, userId, from) {
   const existing = await env.KV.get(`user:${userId}`, { type: "json" });
   if (existing && existing.thread_id) return existing;
-
-  const res = await tgApi(env.ENV_BOT_TOKEN, "createForumTopic", {
-    chat_id: env.ENV_SUPERGROUP_ID,
-    name: buildTopicTitle(from)
-  });
+  const res = await tgApi(env.ENV_BOT_TOKEN, "createForumTopic", { chat_id: env.ENV_SUPERGROUP_ID, name: buildTopicTitle(from) });
   if (!res.ok) throw new Error("创建话题失败: " + res.description);
-
   const rec = { thread_id: res.result.message_thread_id, title: buildTopicTitle(from) };
   await env.KV.put(`user:${userId}`, JSON.stringify(rec));
   await env.KV.put(`thread:${rec.thread_id}`, String(userId));
@@ -176,17 +166,23 @@ async function getUserIdByThread(env, threadId) {
   return uid ? Number(uid) : null;
 }
 
+// 30秒后删除消息
+function scheduleDelete(token, chatId, messageId) {
+  setTimeout(async () => {
+    try {
+      await tgApi(token, "deleteMessage", { chat_id: chatId, message_id: messageId });
+    } catch (e) { /* 忽略删除失败 */ }
+  }, 30000);
+}
+
 // ============ 通知主人话题 ============
 async function notifyOwner(env, userId, from, text) {
   try {
     const topic = await getOrCreateTopic(env, userId, from);
     await tgApi(env.ENV_BOT_TOKEN, "sendMessage", {
-      chat_id: env.ENV_SUPERGROUP_ID,
-      message_thread_id: topic.thread_id,
-      text: text
+      chat_id: env.ENV_SUPERGROUP_ID, message_thread_id: topic.thread_id, text: text
     });
   } catch (e) {
-    // 创建话题失败，私聊通知主人
     await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: env.ENV_OWNER_ID, text: `[话题创建失败] ${text}` });
   }
 }
@@ -196,12 +192,14 @@ async function sendTextVerify(env, userId, from) {
   const q = generateTextQuestion();
   await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "text", answer: q.answer }), { expirationTtl: 300 });
   const buttons = q.options.map(e => ({ text: e, callback_data: `v:text:${e}` }));
-  await tgApi(env.ENV_BOT_TOKEN, "sendMessage", {
+  const res = await tgApiWithId(env.ENV_BOT_TOKEN, "sendMessage", {
     chat_id: userId,
     text: `🤖 请回答以下问题：\n\n${q.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
-  // 通知主人有新访客
+  // 30秒后自毁
+  if (res.ok && res.result) scheduleDelete(env.ENV_BOT_TOKEN, userId, res.result.message_id);
+  // 通知主人
   await notifyOwner(env, userId, from, `👤 新访客：${from.first_name || "未知"}\nUID: ${userId}\n正在答题...`);
 }
 
@@ -209,13 +207,12 @@ async function sendEmojiVerify(env, userId, from) {
   const c = generateEmojiCaptcha();
   await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "emoji", answer: c.answer }), { expirationTtl: 300 });
   const buttons = c.options.map(e => ({ text: e, callback_data: `v:emoji:${e}` }));
-  await tgApi(env.ENV_BOT_TOKEN, "sendMessage", {
+  const res = await tgApiWithId(env.ENV_BOT_TOKEN, "sendMessage", {
     chat_id: userId,
     text: `⚠️ 文字验证失败，再来一个：\n\n${c.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
-  // 通知主人
-  await notifyOwner(env, userId, from, `⚠️ 访客 ${from.first_name || "未知"} (${userId}) 文字验证失败，正在表情验证...`);
+  if (res.ok && res.result) scheduleDelete(env.ENV_BOT_TOKEN, userId, res.result.message_id);
 }
 
 // ============ 转发消息 ============
@@ -223,7 +220,6 @@ async function forwardToTopic(env, userId, from, msg) {
   const topic = await getOrCreateTopic(env, userId, from);
   const token = env.ENV_BOT_TOKEN;
   const body = { chat_id: env.ENV_SUPERGROUP_ID, message_thread_id: topic.thread_id };
-
   if (msg.text) await tgApi(token, "sendMessage", { ...body, text: msg.text });
   else if (msg.photo) await tgApi(token, "sendPhoto", { ...body, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
   else if (msg.video) await tgApi(token, "sendVideo", { ...body, video: msg.video.file_id, caption: msg.caption || "" });
@@ -258,7 +254,6 @@ async function handleAdminCommand(env, userId, threadId, text) {
   const token = env.ENV_BOT_TOKEN;
   const chatId = env.ENV_SUPERGROUP_ID;
   const body = { chat_id: chatId, message_thread_id: threadId };
-
   if (text === "/close") {
     await env.KV.put(`closed:${userId}`, "1");
     await tgApi(token, "closeForumTopic", { chat_id: chatId, message_thread_id: threadId });
@@ -303,9 +298,7 @@ async function handleAdminCommand(env, userId, threadId, text) {
 // ============ 主处理 ============
 export default {
   async fetch(request, env) {
-    if (request.method === "GET") {
-      return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
-    }
+    if (request.method === "GET") return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
     const update = await request.json();
@@ -313,11 +306,15 @@ export default {
     // ---- 反应/表情转发 ----
     if (update.message_reaction) {
       const mr = update.message_reaction;
-      if (String(mr.chat.id) === String(env.ENV_SUPERGROUP_ID) && mr.message_thread_id) {
-        const userId = await getUserIdByThread(env, mr.message_thread_id);
+      const chatId = String(mr.chat.id);
+      const threadId = mr.message_thread_id;
+
+      // 群组话题里的反应 → 转发给访客
+      if (chatId === String(env.ENV_SUPERGROUP_ID) && threadId) {
+        const userId = await getUserIdByThread(env, threadId);
         if (userId) {
           const emoji = (mr.new_reaction || []).map(r => r.emoji || "").filter(Boolean).join("");
-          if (emoji) await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: userId, text: `👍 主人回应了你的消息：${emoji}` });
+          if (emoji) await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: userId, text: `👍 主人回应：${emoji}` });
         }
       }
       return new Response("ok");
@@ -339,7 +336,7 @@ export default {
         if (selected === state.answer) {
           await env.KV.put(`verified:${uid}`, "1", { expirationTtl: 2592000 });
           await env.KV.delete(`verify:${uid}`);
-          await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 验证通过，可以对话了`);
+          await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 验证通过`);
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "✅ 验证通过！" }), { headers: { "Content-Type": "application/json" } });
         }
         await sendEmojiVerify(env, uid, q.from);
@@ -356,16 +353,15 @@ export default {
         if (selected === state.answer) {
           await env.KV.put(`verified:${uid}`, "1", { expirationTtl: 2592000 });
           await env.KV.delete(`verify:${uid}`);
-          await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 表情验证通过，可以对话了`);
+          await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 验证通过`);
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "✅ 验证通过！" }), { headers: { "Content-Type": "application/json" } });
         }
         // ban 一周
         await env.KV.put(`banned:${uid}`, "1", { expirationTtl: 604800 });
         await env.KV.delete(`verify:${uid}`);
         await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 验证失败，你已被关小黑屋，一周后自动解除。" });
-        // 在话题里通知主人，主人可以 /unban
-        await notifyOwner(env, uid, q.from, `🚫 访客 ${q.from.first_name || "未知"} (${uid}) 验证失败，已 ban 一周\n在本话题发送 /unban 可立即解封`);
-        return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "🚫 验证失败，已被封禁一周", show_alert: true }), { headers: { "Content-Type": "application/json" } });
+        await notifyOwner(env, uid, q.from, `🚫 访客 ${q.from.first_name || "未知"} (${uid}) 验证失败，已 ban 一周\n在本话题发送 /unban 可解封`);
+        return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "🚫 已被封禁", show_alert: true }), { headers: { "Content-Type": "application/json" } });
       }
 
       return new Response("ok");
@@ -381,59 +377,65 @@ export default {
       if (msg.chat && String(msg.chat.id) === String(env.ENV_SUPERGROUP_ID) && msg.message_thread_id) {
         const targetUserId = await getUserIdByThread(env, msg.message_thread_id);
         if (!targetUserId) return new Response("ok");
-
         if (text.startsWith("/")) {
           await handleAdminCommand(env, targetUserId, msg.message_thread_id, text);
           return new Response("ok");
         }
-
         const closed = await env.KV.get(`closed:${targetUserId}`);
         if (closed) {
           await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: env.ENV_SUPERGROUP_ID, message_thread_id: msg.message_thread_id, text: "⚠️ 对话已关闭，请先 /open" });
           return new Response("ok");
         }
-
         await replyToVisitor(env, targetUserId, msg);
         return new Response("ok");
       }
 
       // === 私聊消息 ===
-
-      // 命令
-      if (text.startsWith("/")) {
-        if (text === "/start") {
-          if (String(uid) === String(env.ENV_OWNER_ID)) {
-            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 机器人已就绪。\n在群组话题里直接发消息即可回复访客。" });
-          } else {
-            const banned = await env.KV.get(`banned:${uid}`);
-            if (banned) {
-              await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 你已被关小黑屋，一周后自动解除。" });
-              await notifyOwner(env, uid, msg.from, `🚫 被 ban 的访客 ${msg.from.first_name || "未知"} (${uid}) 尝试访问\n在本话题发送 /unban 可解封`);
-            } else {
-              await sendTextVerify(env, uid, msg.from);
-            }
-          }
-        }
-        return new Response("ok");
-      }
-
-      // 主人私聊
       if (String(uid) === String(env.ENV_OWNER_ID)) return new Response("ok");
 
       // 封禁检查
       const banned = await env.KV.get(`banned:${uid}`);
       if (banned) return new Response("ok");
 
-      // 永久信任检查
+      // 永久信任
       const trusted = await env.KV.get(`trusted:${uid}`);
 
-      // 已验证 / 永久信任
+      // 已验证
       if (trusted || await env.KV.get(`verified:${uid}`)) {
+        // 验证通过后再发 /start 不重新验证
+        if (text === "/start") {
+          await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "✅ 你已通过验证，直接发消息即可。" });
+          return new Response("ok");
+        }
         await forwardToTopic(env, uid, msg.from, msg);
         return new Response("ok");
       }
 
-      // 未验证 → 发文字验证
+      // 命令
+      if (text.startsWith("/")) {
+        if (text === "/start") {
+          const verifyState = await env.KV.get(`verify:${uid}`, { type: "json" });
+          if (verifyState) {
+            // 已在验证中，不重发
+            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "⏳ 验证进行中，请回答上方的问题。" });
+          } else {
+            await sendTextVerify(env, uid, msg.from);
+          }
+        }
+        return new Response("ok");
+      }
+
+      // 验证中乱发消息 → ban 1小时
+      const verifyState = await env.KV.get(`verify:${uid}`, { type: "json" });
+      if (verifyState) {
+        await env.KV.put(`banned:${uid}`, "1", { expirationTtl: 3600 });
+        await env.KV.delete(`verify:${uid}`);
+        await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 请认真答题，你已被封禁1小时。" });
+        await notifyOwner(env, uid, msg.from, `🚫 访客 ${msg.from.first_name || "未知"} (${uid}) 验证中乱发消息，已 ban 1小时`);
+        return new Response("ok");
+      }
+
+      // 未验证未发 /start → 提示
       await sendTextVerify(env, uid, msg.from);
     }
 
