@@ -195,29 +195,46 @@ async function notifyOwner(env, userId, from, text) {
 // ============ 发送验证题 ============
 async function sendTextVerify(env, userId, from) {
   const q = generateTextQuestion();
-  await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "text", answer: q.answer }), { expirationTtl: 300 });
+  await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "text", answer: q.answer, warned: false, qids: [] }), { expirationTtl: 300 });
   const buttons = q.options.map(e => ({ text: e, callback_data: `v:text:${e}` }));
   const res = await tgApiWithId(env.ENV_BOT_TOKEN, "sendMessage", {
     chat_id: userId,
     text: `🤖 请回答以下问题：\n\n${q.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
-  // 30秒后自毁
-  if (res.ok && res.result) scheduleDelete(env.ENV_BOT_TOKEN, userId, res.result.message_id);
-  // 通知主人
+  // 记录题目消息 ID
+  if (res.ok && res.result) {
+    const state = await env.KV.get(`verify:${userId}`, { type: "json" });
+    if (state) { state.qids.push(res.result.message_id); await env.KV.put(`verify:${userId}`, JSON.stringify(state), { expirationTtl: 300 }); }
+  }
   await notifyOwner(env, userId, from, `👤 新访客：${from.first_name || "未知"}\nUID: ${userId}\n正在答题...`);
 }
 
 async function sendEmojiVerify(env, userId, from) {
   const c = generateEmojiCaptcha();
-  await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "emoji", answer: c.answer }), { expirationTtl: 300 });
+  const oldState = await env.KV.get(`verify:${userId}`, { type: "json" });
+  const qids = oldState?.qids || [];
+  await env.KV.put(`verify:${userId}`, JSON.stringify({ stage: "emoji", answer: c.answer, warned: false, qids }), { expirationTtl: 300 });
   const buttons = c.options.map(e => ({ text: e, callback_data: `v:emoji:${e}` }));
   const res = await tgApiWithId(env.ENV_BOT_TOKEN, "sendMessage", {
     chat_id: userId,
     text: `⚠️ 文字验证失败，再来一个：\n\n${c.question}`,
     reply_markup: { inline_keyboard: [buttons] }
   });
-  if (res.ok && res.result) scheduleDelete(env.ENV_BOT_TOKEN, userId, res.result.message_id);
+  if (res.ok && res.result) {
+    const state = await env.KV.get(`verify:${userId}`, { type: "json" });
+    if (state) { state.qids.push(res.result.message_id); await env.KV.put(`verify:${userId}`, JSON.stringify(state), { expirationTtl: 300 }); }
+  }
+}
+
+// 销毁验证题目消息
+async function deleteVerifyMessages(env, userId) {
+  const state = await env.KV.get(`verify:${userId}`, { type: "json" });
+  if (state?.qids) {
+    for (const mid of state.qids) {
+      try { await tgApi(env.ENV_BOT_TOKEN, "deleteMessage", { chat_id: userId, message_id: mid }); } catch (e) {}
+    }
+  }
 }
 
 // ============ 转发消息 ============
@@ -340,6 +357,7 @@ export default {
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "验证已过期，请重发 /start" }), { headers: { "Content-Type": "application/json" } });
         }
         if (selected === state.answer) {
+          await deleteVerifyMessages(env, uid);
           await env.KV.put(`verified:${uid}`, "1", { expirationTtl: 2592000 });
           await env.KV.delete(`verify:${uid}`);
           await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 验证通过`);
@@ -357,12 +375,14 @@ export default {
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "验证已过期，请重发 /start" }), { headers: { "Content-Type": "application/json" } });
         }
         if (selected === state.answer) {
+          await deleteVerifyMessages(env, uid);
           await env.KV.put(`verified:${uid}`, "1", { expirationTtl: 2592000 });
           await env.KV.delete(`verify:${uid}`);
           await notifyOwner(env, uid, q.from, `✅ 访客 ${q.from.first_name || "未知"} (${uid}) 验证通过`);
           return new Response(JSON.stringify({ method: "answerCallbackQuery", callback_query_id: q.id, text: "✅ 验证通过！" }), { headers: { "Content-Type": "application/json" } });
         }
         // ban 一周
+        await deleteVerifyMessages(env, uid);
         await env.KV.put(`banned:${uid}`, "1", { expirationTtl: 604800 });
         await env.KV.delete(`verify:${uid}`);
         await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 验证失败，你已被关小黑屋，一周后自动解除。" });
@@ -422,8 +442,9 @@ export default {
         if (text === "/start") {
           const verifyState = await env.KV.get(`verify:${uid}`, { type: "json" });
           if (verifyState) {
-            // 已在验证中，不重发
-            await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "⏳ 验证进行中，请回答上方的问题。" });
+            // 已在验证中，不重发，提示消息30秒自毁
+            const r = await tgApiWithId(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "⏳ 验证进行中，请回答上方的问题。" });
+            if (r.ok && r.result) scheduleDelete(env.ENV_BOT_TOKEN, uid, r.result.message_id);
           } else {
             await sendTextVerify(env, uid, msg.from);
           }
@@ -431,13 +452,23 @@ export default {
         return new Response("ok");
       }
 
-      // 验证中乱发消息 → ban 1小时
+      // 验证中乱发消息 → 先警告，再犯 ban
       const verifyState = await env.KV.get(`verify:${uid}`, { type: "json" });
       if (verifyState) {
-        await env.KV.put(`banned:${uid}`, "1", { expirationTtl: 3600 });
-        await env.KV.delete(`verify:${uid}`);
-        await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 请认真答题，你已被封禁1小时。" });
-        await notifyOwner(env, uid, msg.from, `🚫 访客 ${msg.from.first_name || "未知"} (${uid}) 验证中乱发消息，已 ban 1小时`);
+        if (verifyState.warned) {
+          // 已警告过，ban 1小时
+          await deleteVerifyMessages(env, uid);
+          await env.KV.put(`banned:${uid}`, "1", { expirationTtl: 3600 });
+          await env.KV.delete(`verify:${uid}`);
+          await tgApi(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "🚫 无视警告，你已被封禁1小时。" });
+          await notifyOwner(env, uid, msg.from, `🚫 访客 ${msg.from.first_name || "未知"} (${uid}) 无视警告，已 ban 1小时`);
+        } else {
+          // 第一次警告
+          verifyState.warned = true;
+          await env.KV.put(`verify:${uid}`, JSON.stringify(verifyState), { expirationTtl: 300 });
+          const r = await tgApiWithId(env.ENV_BOT_TOKEN, "sendMessage", { chat_id: uid, text: "⚠️ 请认真答题，再次乱发消息将被封禁。" });
+          if (r.ok && r.result) scheduleDelete(env.ENV_BOT_TOKEN, uid, r.result.message_id);
+        }
         return new Response("ok");
       }
 
