@@ -12,7 +12,8 @@
 ### 前置准备
 1. 创建 Telegram **群组**，开启**话题功能**（Forum Topics）
 2. 把机器人拉入群组，设为**管理员**（需要管理话题权限）
-3. 获取群组 ID 和用户 ID：手机端可用机器人 🤖 @chunge111_bot 查询
+3. 获取群组 ID 和用户 ID：手机端可用机器人 🤖 @chunge111_bot 查询，复制粘贴到一边备用
+4. @BotFather → /mybots → 选择机器人 → Settings → Group Privacy → **Turn off**（关闭disabled隐私模式，让机器人能读取群组消息）
 
 ### 部署
 
@@ -28,8 +29,8 @@
 5. 部署
 
 ### 部署后
-1. @BotFather → /mybots → 选择机器人 → Settings → Group Privacy → **Turn off**（关闭隐私模式，让机器人能读取群组消息）
-2. 访问 Worker 域名 → 输入 Token → 点击激活
+1. 日志显示：✨ Success! Build completed.
+2. 点击【概览】 → 访问 Worker 域名 → 输入 你的BotToken → 点击激活
 
 ## 📖 验证流程
 ```
