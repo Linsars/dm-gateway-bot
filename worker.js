@@ -166,13 +166,18 @@ async function getUserIdByThread(env, threadId) {
   return uid ? Number(uid) : null;
 }
 
-// 30秒后删除消息
+// 全局 waitUntil 引用
+let _waitUntil = null;
+
+// 30秒后删除消息（用 waitUntil 保活）
 function scheduleDelete(token, chatId, messageId) {
-  setTimeout(async () => {
+  const p = new Promise(resolve => setTimeout(async () => {
     try {
       await tgApi(token, "deleteMessage", { chat_id: chatId, message_id: messageId });
     } catch (e) { /* 忽略删除失败 */ }
-  }, 30000);
+    resolve();
+  }, 30000));
+  if (_waitUntil) _waitUntil(p);
 }
 
 // ============ 通知主人话题 ============
@@ -297,7 +302,8 @@ async function handleAdminCommand(env, userId, threadId, text) {
 
 // ============ 主处理 ============
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
+    _waitUntil = ctx.waitUntil.bind(ctx);
     if (request.method === "GET") return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
