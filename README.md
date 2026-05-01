@@ -17,7 +17,7 @@
 
 ### 部署
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Linsars/dm-gateway-bot)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Linsars/tg-O2O-bot)
 
 1. 点击上方 ☝️ 屎黄色按钮
 2. 克隆仓库（默认即可）
