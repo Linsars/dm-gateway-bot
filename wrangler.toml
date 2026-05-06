@@ -7,6 +7,8 @@ workers_dev = true
 ENV_OWNER_ID = "你的Telegram用户ID"
 ENV_SUPERGROUP_ID = "你的群组ID（-100开头）"
 ENV_BOT_TOKEN = "你的Bot Token"
+ENV_WEBHOOK_SECRET = "自定义密钥（用于Webhook验证）"
+ENV_HEALTH_KEY = "自定义密钥（用于health端点鉴权）"
 
 [[kv_namespaces]]
 binding = "KV"
