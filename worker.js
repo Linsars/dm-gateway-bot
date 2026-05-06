@@ -29,7 +29,7 @@ button:hover{background:#006699}.tip{font-size:12px;color:#999;margin-top:15px}
 </div>
 <script>
 (async()=>{try{const r=await fetch("/health?key="+new URLSearchParams(location.search).get("key"));const d=await r.json();const h=document.getElementById("health");h.textContent=d.status==="ok"?"运行中":"异常";h.className=d.status==="ok"?"h-ok":"h-err"}catch(e){document.getElementById("health").textContent="离线";document.getElementById("health").className="h-err"}})();
-async function activate(){var t=document.getElementById("token").value.trim(),r=document.getElementById("result");if(!t){r.style.display="block";r.className="err";r.textContent="请输入 Token";return}r.style.display="block";r.className="";r.textContent="正在激活...";try{var s="__SECRET__";var url="https://api.telegram.org/bot"+t+"/setWebhook?url="+encodeURIComponent(location.origin);if(s)url+="&secret_token="+encodeURIComponent(s);var resp=await fetch(url);var d=await resp.json();if(d.ok){r.className="ok";r.textContent="✅ 激活成功！"}else{r.className="err";r.textContent="❌ "+d.description}}catch(e){r.className="err";r.textContent="❌ "+e.message}}
+async function activate(){var t=document.getElementById("token").value.trim(),r=document.getElementById("result");if(!t){r.style.display="block";r.className="err";r.textContent="请输入 Token";return}r.style.display="block";r.className="";r.textContent="正在激活...";try{var resp=await fetch("/activate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:t})});var d=await resp.json();if(d.ok){r.className="ok";r.textContent="✅ 激活成功！"}else{r.className="err";r.textContent="❌ "+d.description}}catch(e){r.className="err";r.textContent="❌ "+e.message}}
 </script></body></html>`;
 
 const TEXT_QUESTIONS = [
@@ -102,11 +102,10 @@ async function notifyOwner(env,userId,from,text){
 }
 
 async function sendTextVerify(env,ctx,userId,from){
-  const q=genTextQ();const qid=shortId();
-  const opts=shuffle(q.options);
-  await env.KV.put(`v:${qid}`,{answer:q.answer,uid:userId},{expirationTtl:300});
+  const q=genTextQ();const qid=shortId();const opts=shuffle(q.options);
+  await env.KV.put(`v:${qid}`,{answer:q.answer,opts,uid:userId},{expirationTtl:300});
   await env.KV.put(`verify:${userId}`,{stage:"text",qid,warned:false,qids:[]},{expirationTtl:300});
-  const buttons=opts.map((_,i)=>({text:opts[i],callback_data:`vt:${qid}:${i}`}));
+  const buttons=opts.map((o,i)=>({text:o,callback_data:`vt:${qid}:${i}`}));
   const res=await tgWithRetry(env.ENV_BOT_TOKEN,"sendMessage",{chat_id:userId,text:`🤖 请回答以下问题：\n\n${q.question}`,reply_markup:{inline_keyboard:[buttons]}});
   if(res.ok?.result){const s=await env.KV.get(`verify:${userId}`,{type:"json"});if(s){s.qids.push(res.result.message_id);await env.KV.put(`verify:${userId}`,s,{expirationTtl:300})}}
   await notifyOwner(env,userId,from,`👤 新访客：${from.first_name||"未知"}\nUID: ${userId}\n正在答题...`);
@@ -114,10 +113,10 @@ async function sendTextVerify(env,ctx,userId,from){
 
 async function sendEmojiVerify(env,ctx,userId,from){
   const c=genEmojiQ();const qid=shortId();
-  await env.KV.put(`v:${qid}`,{answer:c.answer,uid:userId},{expirationTtl:300});
+  await env.KV.put(`v:${qid}`,{answer:c.answer,opts:c.options,uid:userId},{expirationTtl:300});
   const old=await env.KV.get(`verify:${userId}`,{type:"json"});
   await env.KV.put(`verify:${userId}`,{stage:"emoji",qid,warned:false,qids:old?.qids||[]},{expirationTtl:300});
-  const buttons=c.options.map((_,i)=>({text:c.options[i],callback_data:`ve:${qid}:${i}`}));
+  const buttons=c.options.map((o,i)=>({text:o,callback_data:`ve:${qid}:${i}`}));
   const res=await tgWithRetry(env.ENV_BOT_TOKEN,"sendMessage",{chat_id:userId,text:`⚠️ 文字验证失败，再来一个：\n\n${c.question}`,reply_markup:{inline_keyboard:[buttons]}});
   if(res.ok?.result){const s=await env.KV.get(`verify:${userId}`,{type:"json"});if(s){s.qids.push(res.result.message_id);await env.KV.put(`verify:${userId}`,s,{expirationTtl:300})}}
 }
@@ -153,7 +152,13 @@ async function forwardToTopic(env,ctx,userId,from,msg){
 }
 
 async function replyToVisitor(env,ctx,targetUserId,msg){
-  const res=await sendMsg(env.ENV_BOT_TOKEN,targetUserId,msg);
+  let extra={};
+  if(msg.reply_to_message){
+    const origTopicMsgId=msg.reply_to_message.message_id;
+    const visitorMsgId=await env.KV.get(`mr:${targetUserId}:${origTopicMsgId}`);
+    if(visitorMsgId)extra.reply_to_message_id=visitorMsgId;
+  }
+  const res=await sendMsg(env.ENV_BOT_TOKEN,targetUserId,msg,extra);
   if(!res.ok&&(res.description||"").includes("blocked")){
     const topic=await env.KV.get(`user:${targetUserId}`,{type:"json"});
     if(topic)await tgWithRetry(env.ENV_BOT_TOKEN,"sendMessage",{chat_id:env.ENV_SUPERGROUP_ID,message_thread_id:topic.thread_id,text:"⚠️ 该访客已断开连接（可能屏蔽了机器人）"});
@@ -185,7 +190,20 @@ export default{
           if(key&&url.searchParams.get("key")!==key)return new Response("Forbidden",{status:403});
           return new Response(JSON.stringify({status:"ok",bot:BOT_NAME,time:new Date().toISOString()}),{headers:{"Content-Type":"application/json"}});
         }
-        return new Response(HTML_PAGE.replace("__SECRET__",env.ENV_WEBHOOK_SECRET||""),{headers:{"Content-Type":"text/html; charset=utf-8"}});
+        return new Response(HTML_PAGE,{headers:{"Content-Type":"text/html; charset=utf-8"}});
+      }
+      if(request.method==="POST"){
+        const url=new URL(request.url);
+        if(url.pathname==="/activate"){
+          const body=await request.json();
+          const token=body.token;
+          if(!token)return new Response(JSON.stringify({ok:false,description:"Missing token"}),{headers:{"Content-Type":"application/json"}});
+          let setUrl=`https://api.telegram.org/bot${token}/setWebhook?url=${url.origin}`;
+          const secret=env.ENV_WEBHOOK_SECRET;
+          if(secret)setUrl+=`&secret_token=${encodeURIComponent(secret)}`;
+          const r=await fetch(setUrl);
+          return new Response(await r.text(),{headers:{"Content-Type":"application/json"}});
+        }
       }
       if(request.method!=="POST")return new Response("Method not allowed",{status:405});
 
@@ -228,15 +246,7 @@ export default{
           const state=await env.KV.get(`verify:${uid}`,{type:"json"});
           if(!state)return new Response(JSON.stringify({method:"answerCallbackQuery",callback_query_id:q.id,text:"验证已过期"}),{headers:{"Content-Type":"application/json"}});
 
-          let selected;
-          if(type==="vt"){
-            const tq=TEXT_QUESTIONS.find(x=>x.a===vdata.answer);
-            if(tq){const opts=shuffle(tq.o);selected=opts[idx]}
-          }else{
-            const answer=vdata.answer;
-            const distractors=shuffle(EMOJI_POOL.filter(e=>e!==answer)).slice(0,7);
-            const opts=shuffle([answer,...distractors]);selected=opts[idx];
-          }
+          const selected=vdata.opts[idx];
 
           if(selected===vdata.answer){
             await deleteVerifyMsgs(env,uid);
