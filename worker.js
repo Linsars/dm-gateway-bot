@@ -339,7 +339,13 @@ async function handleAdminCommand(env, userId, threadId, text) {
 export default {
   async fetch(request, env, ctx) {
     _waitUntil = ctx.waitUntil.bind(ctx);
-    if (request.method === "GET") return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    if (request.method === "GET") {
+      const url = new URL(request.url);
+      if (url.pathname === "/health") {
+        return new Response(JSON.stringify({ status: "ok", bot: "tg-o2o-bot", time: new Date().toISOString() }), { headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(HTML_PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
     const update = await request.json();
