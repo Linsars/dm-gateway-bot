@@ -244,23 +244,27 @@ async function deleteVerifyMessages(env, userId) {
   }
 }
 
-// ============ 转发消息 ============
+// ============ 通用消息发送 ============
+async function sendMsg(token, chatId, msg, extra) {
+  const body = { chat_id: chatId, ...extra };
+  if (msg.text) return tgApi(token, "sendMessage", { ...body, text: msg.text });
+  if (msg.photo) return tgApi(token, "sendPhoto", { ...body, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
+  if (msg.video) return tgApi(token, "sendVideo", { ...body, video: msg.video.file_id, caption: msg.caption || "" });
+  if (msg.voice) return tgApi(token, "sendVoice", { ...body, voice: msg.voice.file_id });
+  if (msg.audio) return tgApi(token, "sendAudio", { ...body, audio: msg.audio.file_id, caption: msg.caption || "" });
+  if (msg.document) return tgApi(token, "sendDocument", { ...body, document: msg.document.file_id, caption: msg.caption || "" });
+  if (msg.sticker) return tgApi(token, "sendSticker", { ...body, sticker: msg.sticker.file_id });
+  if (msg.video_note) return tgApi(token, "sendVideoNote", { ...body, video_note: msg.video_note.file_id });
+  if (msg.animation) return tgApi(token, "sendAnimation", { ...body, animation: msg.animation.file_id, caption: msg.caption || "" });
+  if (msg.location) return tgApi(token, "sendLocation", { ...body, latitude: msg.location.latitude, longitude: msg.location.longitude });
+  if (msg.contact) return tgApi(token, "sendContact", { ...body, phone_number: msg.contact.phone_number, first_name: msg.contact.first_name });
+  return tgApi(token, "sendMessage", { ...body, text: "[未知消息类型]" });
+}
+
+// 访客消息 → 群组话题
 async function forwardToTopic(env, userId, from, msg) {
   const topic = await getOrCreateTopic(env, userId, from);
-  const token = env.ENV_BOT_TOKEN;
-  const body = { chat_id: env.ENV_SUPERGROUP_ID, message_thread_id: topic.thread_id };
-  if (msg.text) await tgApi(token, "sendMessage", { ...body, text: msg.text });
-  else if (msg.photo) await tgApi(token, "sendPhoto", { ...body, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
-  else if (msg.video) await tgApi(token, "sendVideo", { ...body, video: msg.video.file_id, caption: msg.caption || "" });
-  else if (msg.voice) await tgApi(token, "sendVoice", { ...body, voice: msg.voice.file_id });
-  else if (msg.audio) await tgApi(token, "sendAudio", { ...body, audio: msg.audio.file_id, caption: msg.caption || "" });
-  else if (msg.document) await tgApi(token, "sendDocument", { ...body, document: msg.document.file_id, caption: msg.caption || "" });
-  else if (msg.sticker) await tgApi(token, "sendSticker", { ...body, sticker: msg.sticker.file_id });
-  else if (msg.video_note) await tgApi(token, "sendVideoNote", { ...body, video_note: msg.video_note.file_id });
-  else if (msg.animation) await tgApi(token, "sendAnimation", { ...body, animation: msg.animation.file_id, caption: msg.caption || "" });
-  else if (msg.location) await tgApi(token, "sendLocation", { ...body, latitude: msg.location.latitude, longitude: msg.location.longitude });
-  else if (msg.contact) await tgApi(token, "sendContact", { ...body, phone_number: msg.contact.phone_number, first_name: msg.contact.first_name });
-  else await tgApi(token, "sendMessage", { ...body, text: "[未知消息类型]" });
+  await sendMsg(env.ENV_BOT_TOKEN, env.ENV_SUPERGROUP_ID, msg, { message_thread_id: topic.thread_id });
 }
 
 // 检查访客是否屏蔽了 bot
@@ -269,34 +273,20 @@ async function isBlockedByUser(env, userId) {
   return !res.ok && (res.description || "").includes("blocked");
 }
 
+// 主人消息 → 访客（含屏蔽检测）
 async function replyToVisitor(env, targetUserId, msg) {
-  const token = env.ENV_BOT_TOKEN;
-
-  // 检查是否被屏蔽
   const blocked = await isBlockedByUser(env, targetUserId);
   if (blocked) {
     const topic = await env.KV.get(`user:${targetUserId}`, { type: "json" });
     if (topic) {
-      await tgApi(token, "sendMessage", {
-        chat_id: env.ENV_SUPERGROUP_ID,
-        message_thread_id: topic.thread_id,
+      await tgApi(env.ENV_BOT_TOKEN, "sendMessage", {
+        chat_id: env.ENV_SUPERGROUP_ID, message_thread_id: topic.thread_id,
         text: "⚠️ 该访客已断开连接（可能屏蔽了机器人）"
       });
     }
     return;
   }
-
-  if (msg.text) await tgApi(token, "sendMessage", { chat_id: targetUserId, text: msg.text });
-  else if (msg.photo) await tgApi(token, "sendPhoto", { chat_id: targetUserId, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
-  else if (msg.video) await tgApi(token, "sendVideo", { chat_id: targetUserId, video: msg.video.file_id, caption: msg.caption || "" });
-  else if (msg.voice) await tgApi(token, "sendVoice", { chat_id: targetUserId, voice: msg.voice.file_id });
-  else if (msg.audio) await tgApi(token, "sendAudio", { chat_id: targetUserId, audio: msg.audio.file_id });
-  else if (msg.document) await tgApi(token, "sendDocument", { chat_id: targetUserId, document: msg.document.file_id, caption: msg.caption || "" });
-  else if (msg.sticker) await tgApi(token, "sendSticker", { chat_id: targetUserId, sticker: msg.sticker.file_id });
-  else if (msg.video_note) await tgApi(token, "sendVideoNote", { chat_id: targetUserId, video_note: msg.video_note.file_id });
-  else if (msg.animation) await tgApi(token, "sendAnimation", { chat_id: targetUserId, animation: msg.animation.file_id });
-  else if (msg.location) await tgApi(token, "sendLocation", { chat_id: targetUserId, latitude: msg.location.latitude, longitude: msg.location.longitude });
-  else await tgApi(token, "copyMessage", { chat_id: targetUserId, from_chat_id: env.ENV_SUPERGROUP_ID, message_id: msg.message_id });
+  await sendMsg(env.ENV_BOT_TOKEN, targetUserId, msg);
 }
 
 // ============ 管理员指令 ============
