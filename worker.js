@@ -263,8 +263,29 @@ async function forwardToTopic(env, userId, from, msg) {
   else await tgApi(token, "sendMessage", { ...body, text: "[未知消息类型]" });
 }
 
+// 检查访客是否屏蔽了 bot
+async function isBlockedByUser(env, userId) {
+  const res = await tgApi(env.ENV_BOT_TOKEN, "sendChatAction", { chat_id: userId, action: "typing" });
+  return !res.ok && (res.description || "").includes("blocked");
+}
+
 async function replyToVisitor(env, targetUserId, msg) {
   const token = env.ENV_BOT_TOKEN;
+
+  // 检查是否被屏蔽
+  const blocked = await isBlockedByUser(env, targetUserId);
+  if (blocked) {
+    const topic = await env.KV.get(`user:${targetUserId}`, { type: "json" });
+    if (topic) {
+      await tgApi(token, "sendMessage", {
+        chat_id: env.ENV_SUPERGROUP_ID,
+        message_thread_id: topic.thread_id,
+        text: "⚠️ 该访客已断开连接（可能屏蔽了机器人）"
+      });
+    }
+    return;
+  }
+
   if (msg.text) await tgApi(token, "sendMessage", { chat_id: targetUserId, text: msg.text });
   else if (msg.photo) await tgApi(token, "sendPhoto", { chat_id: targetUserId, photo: msg.photo[msg.photo.length - 1].file_id, caption: msg.caption || "" });
   else if (msg.video) await tgApi(token, "sendVideo", { chat_id: targetUserId, video: msg.video.file_id, caption: msg.caption || "" });
